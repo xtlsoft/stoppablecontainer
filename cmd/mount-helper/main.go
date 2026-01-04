@@ -78,10 +78,12 @@ func main() {
 }
 
 // scanAndProcessRequests scans the work directory for mount requests
+// Directory structure: /var/lib/stoppablecontainer/<namespace>/<name>/request.json
 func scanAndProcessRequests() error {
 	hostWorkBase := filepath.Join(HostRootPath, WorkBasePath)
 
-	entries, err := os.ReadDir(hostWorkBase)
+	// Scan namespace directories
+	namespaceEntries, err := os.ReadDir(hostWorkBase)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil // No work directory yet
@@ -89,27 +91,53 @@ func scanAndProcessRequests() error {
 		return fmt.Errorf("failed to read work directory: %w", err)
 	}
 
-	for _, entry := range entries {
-		if !entry.IsDir() {
+	for _, nsEntry := range namespaceEntries {
+		if !nsEntry.IsDir() {
 			continue
 		}
 
-		workDir := filepath.Join(hostWorkBase, entry.Name())
-		requestFile := filepath.Join(workDir, RequestFileName)
+		nsDir := filepath.Join(hostWorkBase, nsEntry.Name())
 
-		if _, err := os.Stat(requestFile); err != nil {
-			continue // No request file
+		// Scan instance directories within namespace
+		instanceEntries, err := os.ReadDir(nsDir)
+		if err != nil {
+			continue
 		}
 
-		log.Info("found mount request", "workDir", workDir)
+		for _, instEntry := range instanceEntries {
+			if !instEntry.IsDir() {
+				continue
+			}
 
-		if err := processRequest(workDir, requestFile); err != nil {
-			log.Error(err, "failed to process request", "workDir", workDir)
-			// Write error response
-			_ = writeResponse(workDir, MountResponse{
-				Status:  "error",
-				Message: err.Error(),
-			})
+			workDir := filepath.Join(nsDir, instEntry.Name())
+			requestFile := filepath.Join(workDir, RequestFileName)
+			readyFile := filepath.Join(workDir, ReadyFileName)
+
+			requestStat, err := os.Stat(requestFile)
+			if err != nil {
+				continue // No request file
+			}
+
+			// Check if already processed (ready.json exists and is newer than request.json)
+			if readyStat, err := os.Stat(readyFile); err == nil {
+				if readyStat.ModTime().After(requestStat.ModTime()) {
+					continue // Already processed
+				}
+				// Request is newer, need to reprocess - remove old ready file
+				log.Info("request is newer than ready, reprocessing", "workDir", workDir)
+				_ = os.Remove(readyFile)
+			}
+
+			log.Info("found mount request", "workDir", workDir)
+
+			if err := processRequest(workDir, requestFile); err != nil {
+				log.Error(err, "failed to process request", "workDir", workDir)
+				// Write error response
+				_ = writeResponse(workDir, MountResponse{
+					Status:  "error",
+					Message: err.Error(),
+				})
+			}
 		}
 	}
 
@@ -251,9 +279,25 @@ func getOverlayfsOptions(pid int) (string, error) {
 }
 
 // adjustPathsForHost adds /host prefix to containerd paths in overlay options
+// and removes unsupported options
 func adjustPathsForHost(opts string) string {
 	// Replace all occurrences of /var/lib/containerd with /host/var/lib/containerd
-	return strings.ReplaceAll(opts, "/var/lib/containerd", HostRootPath+"/var/lib/containerd")
+	result := strings.ReplaceAll(opts, "/var/lib/containerd", HostRootPath+"/var/lib/containerd")
+
+	// Parse and filter overlay options to only keep essential ones
+	// Some options like uuid=on may not be supported on all kernels
+	parts := strings.Split(result, ",")
+	var filtered []string
+	for _, part := range parts {
+		// Keep only essential overlay options
+		if strings.HasPrefix(part, "lowerdir=") ||
+			strings.HasPrefix(part, "upperdir=") ||
+			strings.HasPrefix(part, "workdir=") {
+			filtered = append(filtered, part)
+		}
+	}
+
+	return strings.Join(filtered, ",")
 }
 
 // mountOverlay creates an overlay mount

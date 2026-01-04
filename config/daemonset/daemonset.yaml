@@ -24,7 +24,7 @@ spec:
       - operator: Exists
       containers:
       - name: mount-helper
-        image: controller:latest
+        image: mount-helper:latest
         securityContext:
           privileged: true
         volumeMounts:

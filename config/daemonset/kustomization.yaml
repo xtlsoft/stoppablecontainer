@@ -9,5 +9,5 @@ resources:
 
 images:
 - name: mount-helper
-  newName: mount-helper
-  newTag: latest
+  newName: stoppablecontainer-mount-helper
+  newTag: e2e-test
