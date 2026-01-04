@@ -470,6 +470,9 @@ Examples:
 				kubectlArgs = append(kubectlArgs, "-c", container)
 			}
 			kubectlArgs = append(kubectlArgs, podName, "--")
+
+			// Use sc-exec wrapper to run commands in the chroot environment
+			kubectlArgs = append(kubectlArgs, "/.sc-bin/sc-exec")
 			kubectlArgs = append(kubectlArgs, cmdArgs...)
 
 			return runKubectl(kubectlArgs...)

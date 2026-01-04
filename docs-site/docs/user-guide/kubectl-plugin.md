@@ -1,6 +1,14 @@
 # kubectl-sc: kubectl Plugin for StoppableContainer
 
-`kubectl-sc` is a kubectl plugin that provides a convenient command-line interface for managing StoppableContainers.
+`kubectl-sc` is a kubectl plugin that provides a convenient command-line interface for managing StoppableContainers. It simplifies common operations like creating, starting, stopping, and executing commands in containers with **persistent root filesystems**.
+
+## Overview
+
+StoppableContainer enables containers whose root filesystem persists even when the workload is stopped. This is useful for:
+
+- **Development environments** - Stop your container, preserve all installed packages and configurations
+- **Stateful applications** - Maintain filesystem state across restarts without external volumes
+- **Cost optimization** - Stop containers when not in use while preserving their state
 
 ## Installation
 
@@ -170,16 +178,20 @@ kubectl sc rm my-app
 # Create a development container
 kubectl sc create dev-env --image=ubuntu:22.04 -- /bin/bash
 
-# Attach to it
+# Attach to it and install packages
 kubectl sc exec dev-env -it -- /bin/bash
+# Inside: apt update && apt install -y python3 nodejs npm ...
 
-# Stop when not needed (fast, preserves state)
+# Stop when not needed (preserves all installed packages!)
 kubectl sc stop dev-env --wait
 
-# Resume later (fast startup)
+# Resume later (all your packages are still there)
 kubectl sc start dev-env --wait
 
-# Delete when done
+# Continue working
+kubectl sc exec dev-env -it -- /bin/bash
+
+# Delete when done (filesystem is destroyed)
 kubectl sc delete dev-env
 ```
 
@@ -228,6 +240,9 @@ kubectl sc delete my-app
 | Create | Apply YAML manifest | `kubectl sc create NAME --image=IMAGE` |
 | Start | Patch spec.running=true | `kubectl sc start NAME` |
 | Stop | Patch spec.running=false | `kubectl sc stop NAME` |
-| Exec | `kubectl exec NAME-consumer -- CMD` | `kubectl sc exec NAME -- CMD` |
+| Exec | `kubectl exec NAME-consumer -- /.sc-bin/sc-exec CMD` | `kubectl sc exec NAME -- CMD` |
 | Logs | `kubectl logs NAME-consumer` | `kubectl sc logs NAME` |
 | Delete | `kubectl delete stoppablecontainer NAME` | `kubectl sc delete NAME` |
+
+!!! note "Exec requires sc-exec wrapper"
+    When using raw `kubectl exec`, you must use the `/.sc-bin/sc-exec` wrapper to run commands in the persistent rootfs. The `kubectl sc exec` command handles this automatically.

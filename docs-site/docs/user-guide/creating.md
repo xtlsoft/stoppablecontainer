@@ -256,7 +256,7 @@ spec:
       securityContext:
         capabilities:
           add:
-            - NET_ADMIN  # Added to required SYS_ADMIN, SYS_CHROOT
+            - NET_ADMIN  # If your application needs network admin capabilities
 ```
 
 ## Development Environments
@@ -283,7 +283,7 @@ Start when needed:
 
 ```bash
 kubectl patch stoppablecontainer dev-shell --type=merge -p '{"spec":{"running":true}}'
-kubectl exec -it dev-shell-consumer -- /bin/bash
+kubectl sc exec dev-shell -- /bin/bash
 ```
 
 ### Python Development Environment

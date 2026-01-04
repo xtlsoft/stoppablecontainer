@@ -1,140 +1,129 @@
 # How It Works
 
-This document provides a detailed technical explanation of how StoppableContainer achieves near-instant container starts.
+This document provides a detailed technical explanation of how StoppableContainer achieves persistent root filesystems.
 
 ## The Problem
 
-Traditional container startup involves these steps:
+Traditional Kubernetes containers have ephemeral filesystems:
 
-1. **Pull image** (if not cached) - seconds to minutes
-2. **Extract image layers** - hundreds of milliseconds to seconds
-3. **Set up namespaces** - milliseconds
-4. **Mount filesystems** - milliseconds
-5. **Start process** - milliseconds
+1. **No persistence** - Any files created or packages installed are lost when the pod is deleted
+2. **No state across restarts** - Even if you restart a pod, the filesystem starts fresh
+3. **Volume limitations** - You can only persist data in explicitly mounted volumes, not the entire rootfs
 
-Steps 1 and 2 are the bottlenecks. Even with cached images, layer extraction can take noticeable time for large images.
+This is problematic for:
+
+- Development environments where you want to install packages and tools
+- Workloads that modify configuration files at runtime
+- Educational platforms where students need persistent environments
 
 ## The Solution
 
-StoppableContainer keeps the extracted filesystem ready at all times:
+StoppableContainer keeps the container's rootfs intact across stop/start cycles:
 
 | Traditional | StoppableContainer |
 |-------------|-------------------|
-| ❌ Extract on every start | ✅ Extract once, reuse |
-| ❌ 500ms+ startup | ✅ ~50ms startup |
-| ❌ Full container restart | ✅ Only process restart |
+| ❌ Filesystem lost on pod delete | ✅ Filesystem preserved |
+| ❌ Packages must be in image | ✅ Install packages at runtime |
+| ❌ No modification persistence | ✅ All changes survive restarts |
 
 ## Implementation Details
 
-### 1. Provider Pod Initialization
+### 1. DaemonSet-Based Mount Architecture
 
-When a StoppableContainerInstance is created, the provider pod:
+The mount-helper DaemonSet runs on every node and handles all privileged operations:
 
 ```bash
-# Provider container entrypoint script
-
-# Create the rootfs directory
-mkdir -p /rootfs/rootfs
-
-# Wait for pause container to provide the rootfs
-# (The pause container uses the same image and provides /rootfs/rootfs)
-while [ ! -d /rootfs/rootfs/bin ]; do
-    sleep 0.1
-done
-
-# Create ready signal file
-echo "ready" > /rootfs/ready
-
-# Keep running forever
-while true; do
-    sleep 86400
-done
+# mount-helper scans for provider containers
+for each provider_pod:
+    # Find the rootfs container by ROOTFS_MARKER env var
+    pid = find_rootfs_container_pid()
+    
+    # Access the container's filesystem via /proc
+    rootfs_path = /proc/{pid}/root
+    
+    # Create overlayfs mount
+    mount -t overlay overlay \
+        -o lowerdir={rootfs_path},upperdir={upper},workdir={work} \
+        {target_path}
+    
+    # Signal readiness
+    write ready.json
 ```
 
-The key insight is that the pause container already has the image's filesystem extracted. We mount it to a HostPath to share with consumers.
+This approach allows the rootfs to persist because:
+
+1. The **provider pod** stays running even when the workload is stopped
+2. The **overlayfs upper layer** captures all modifications
+3. The **mount-helper** maintains the mount as long as the provider is alive
 
 ### 2. HostPath Sharing
 
-The extracted rootfs is exposed via HostPath:
+The rootfs is shared between provider and consumer via HostPath:
 
 ```yaml
 volumes:
   - name: rootfs-host
     hostPath:
-      path: /var/lib/stoppable-container/{instance-name}
+      path: /var/lib/stoppablecontainer/{instance-name}
       type: DirectoryOrCreate
 ```
 
-This allows the consumer pod (on the same node) to access the pre-extracted filesystem.
+This allows the consumer pod (on the same node) to access the mounted filesystem with all modifications.
 
 ### 3. Consumer Pod Startup
 
-The consumer container uses an entrypoint script that:
+The consumer container uses the exec-wrapper binary that:
+
+1. Waits for the rootfs to be ready (checks for ready.json)
+2. Chroots into the mounted rootfs
+3. Executes the user's command
 
 ```bash
-#!/bin/sh
-
-echo "[consumer] Starting consumer container..."
-
-# Wait for rootfs to be ready
-while [ ! -f /rootfs/ready ]; do
-    sleep 0.1
-done
-
-echo "[consumer] Rootfs ready, setting up mounts..."
-
-# Mount essential filesystems
-mount -t proc proc /rootfs/rootfs/proc
-mount -t sysfs sys /rootfs/rootfs/sys
-mount --bind /dev /rootfs/rootfs/dev
-
-echo "[consumer] Mounts ready, chrooting..."
-
-# Chroot and execute user command
-cd /rootfs/rootfs
-chroot . /exec-wrapper "$@"
+# Simplified exec-wrapper logic
+wait_for_ready "/rootfs/ready.json"
+chroot /rootfs /bin/sh -c "$USER_COMMAND"
 ```
 
 ### 4. Exec Wrapper
 
-The exec-wrapper is a minimal binary that:
+The exec-wrapper (`/.sc-bin/sc-exec`) is a Go binary that:
 
-1. Sets up the execution environment
+1. Sets up the execution environment inside the chroot
 2. Handles signal forwarding
-3. Execs the actual user command
+3. Finds and executes the requested command
 
-This ensures proper process handling within the chrooted environment.
+When you run `kubectl sc exec my-app -- /bin/bash`, it automatically uses the exec-wrapper to enter the chroot environment.
 
-## Timing Analysis
+## Why Overlayfs?
 
-Typical timing for a busybox container:
+StoppableContainer uses overlayfs for the rootfs mount:
 
-| Step | Traditional | StoppableContainer |
-|------|-------------|-------------------|
-| Image extraction | 200ms | 0ms (pre-extracted) |
-| Create consumer pod | N/A | 50ms |
-| Wait for rootfs | N/A | <10ms |
-| Mount proc/sys/dev | N/A | 5ms |
-| Chroot + exec | N/A | 5ms |
-| **Total** | **200ms+** | **~70ms** |
+```
+┌─────────────────────────────────────┐
+│           Merged View               │ ← What the consumer sees
+├─────────────────────────────────────┤
+│  Upper Layer (read-write)           │ ← Modifications stored here
+├─────────────────────────────────────┤
+│  Lower Layer (read-only)            │ ← Original container image
+└─────────────────────────────────────┘
+```
 
-For larger images (e.g., Python, Node.js), the difference is more dramatic:
+Benefits:
 
-| Image | Traditional | StoppableContainer |
-|-------|-------------|-------------------|
-| busybox:stable | 200ms | 70ms |
-| python:3.11-slim | 800ms | 80ms |
-| node:20-slim | 1200ms | 85ms |
-| ubuntu:22.04 | 500ms | 75ms |
+1. **Efficient storage**: Only modifications are stored in the upper layer
+2. **Image integrity**: Original image is never modified
+3. **Quick restarts**: No need to copy the entire filesystem
 
-## Why Not Use Container Checkpointing?
+## Comparison with Alternatives
 
-Container checkpointing (CRIU) is an alternative approach that:
+### vs. Container Checkpointing (CRIU)
 
 | CRIU | StoppableContainer |
 |------|-------------------|
 | Saves/restores process state | Only manages filesystem |
 | Requires kernel support | Works on any Kubernetes cluster |
+| Complex failure modes | Simple, predictable behavior |
+| Not widely supported | Works everywhere |
 | Complex failure modes | Simple, predictable behavior |
 | Not widely supported | Works everywhere |
 
@@ -151,13 +140,14 @@ Provider and consumer pods must run on the same node because they share the file
 
 ### Filesystem State
 
-The rootfs is shared by reference, not copied. This means:
+The rootfs is persistent and isolated via overlayfs:
 
-- ✅ Fast startup (no copying)
-- ⚠️ Changes in consumer affect the rootfs
-- ⚠️ Restart gets the modified filesystem
+- ✅ Each instance has its own writable layer
+- ✅ Changes persist across container restarts
+- ✅ Base image remains unchanged (copy-on-write)
+- ⚠️ Each StoppableContainerInstance has isolated changes
 
-For stateless applications, this is usually fine. For stateful workloads, consider using volumes for persistent data.
+This is the primary benefit of StoppableContainer - your filesystem modifications survive pod restarts.
 
 ### Image Updates
 

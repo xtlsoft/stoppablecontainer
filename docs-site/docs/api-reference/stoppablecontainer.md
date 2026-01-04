@@ -174,10 +174,7 @@ container:
 | Type | `SecurityContext` |
 | Required | No |
 
-Security context for the container.
-
-!!! note
-    `SYS_ADMIN` and `SYS_CHROOT` capabilities are automatically added.
+Security context for the container. With the DaemonSet architecture, no special capabilities are required.
 
 **Example:**
 
@@ -189,7 +186,7 @@ container:
     runAsNonRoot: true
     capabilities:
       add:
-        - NET_ADMIN
+        - NET_ADMIN  # If your application needs it
 ```
 
 ### `spec.template.nodeSelector`

@@ -60,12 +60,11 @@ spec:
           memory: "128Mi"
       
       # Optional: Security context
-      # Note: SYS_ADMIN and SYS_CHROOT capabilities are automatically added
       securityContext:
         runAsUser: 1000
         runAsGroup: 1000
         capabilities:
-          add: ["NET_ADMIN"]  # Additional capabilities
+          add: ["NET_ADMIN"]  # Additional capabilities if needed
 ```
 
 ### Node Selection
@@ -147,9 +146,9 @@ spec:
 The provider pod is automatically configured and cannot be directly customized. It:
 
 - Uses the same image as your container
-- Runs with `privileged: true` for mount propagation
-- Has two containers: `pause` and `provider`
-- Exports the rootfs to a HostPath volume
+- Runs without special privileges (mount-helper DaemonSet handles privileged operations)
+- Runs the container's original entrypoint
+- Has its rootfs shared via the mount-helper
 
 ## Consumer Pod Configuration
 
@@ -157,14 +156,14 @@ The consumer pod inherits most settings from your template:
 
 - Environment variables
 - Resource limits/requests
-- Security context (with required capabilities added)
+- Security context
 - Node selector and tolerations
 
 Additional behaviors:
 
-- Automatically adds `SYS_ADMIN` and `SYS_CHROOT` capabilities
-- Merges user-specified capabilities with required ones
-- Uses an init container to set up the exec wrapper
+- Uses the exec-wrapper (`/.sc-bin/sc-exec`) to run commands in the persistent rootfs
+- The exec-wrapper communicates with mount-helper DaemonSet for chroot operations
+- No special capabilities are added to the consumer pod itself
 
 ## Environment Variables
 

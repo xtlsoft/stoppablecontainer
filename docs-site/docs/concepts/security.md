@@ -4,112 +4,112 @@ This document covers the security model, considerations, and best practices for 
 
 ## Security Model Overview
 
-StoppableContainer operates with a split security model:
+StoppableContainer uses a DaemonSet-based architecture to centralize privileged operations:
 
 | Component | Security Level | Reason |
 |-----------|---------------|--------|
-| Provider Pod | Privileged | Required for Bidirectional mount propagation |
-| Consumer Pod | Capabilities | Only SYS_ADMIN and SYS_CHROOT needed |
+| mount-helper DaemonSet | Privileged | Handles all mount/chroot operations |
+| Provider Pod | Standard | No elevated privileges required |
+| Consumer Pod | Standard | No elevated privileges required |
 | Controller | Standard | No elevated privileges |
 
-## Provider Pod Security
+!!! success "Improved Security Model"
+    With the DaemonSet architecture, application pods (providers and consumers) run with **no special privileges**. All privileged operations are centralized in the mount-helper DaemonSet.
+
+## mount-helper DaemonSet Security
 
 ### Why Privileged?
 
-The provider pod requires `privileged: true` due to a Kubernetes limitation:
+The mount-helper DaemonSet requires elevated privileges to:
 
-!!! warning "Kubernetes Requirement"
-    Bidirectional mount propagation is only allowed for privileged containers.
-    
-    See: [Kubernetes Mount Propagation Documentation](https://kubernetes.io/docs/concepts/storage/volumes/#mount-propagation)
+1. **Mount overlayfs**: Creating persistent overlayfs layers for container rootfs
+2. **Bind mount**: Sharing the rootfs with consumer pods via HostPath
+3. **Execute chroot operations**: Running exec-wrapper within the rootfs
 
-The provider pod needs Bidirectional mount propagation to share the rootfs with the host and subsequently with consumer pods.
+!!! info "Privilege Centralization"
+    Instead of every provider/consumer pod needing capabilities, only the mount-helper DaemonSet runs privileged. This is a more secure design.
 
 ### Mitigations
 
-To reduce risk from the privileged provider pod:
+The mount-helper DaemonSet reduces risk through:
 
-1. **Minimal attack surface**: The provider only runs a simple shell script
-2. **No network access needed**: Consider adding NetworkPolicy
-3. **No secrets mounted**: Only the rootfs volume is mounted
-4. **Runs a controlled image**: Same image as user container, but predictable entrypoint
+1. **Minimal attack surface**: Only performs mount operations
+2. **Controlled operations**: Only responds to controller requests
+3. **No application code**: Doesn't run user workloads
+4. **Single instance per node**: Easy to audit and monitor
 
-Example NetworkPolicy:
+Example NetworkPolicy for mount-helper:
 
 ```yaml
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: deny-provider-egress
+  name: deny-mount-helper-egress
+  namespace: stoppablecontainer-system
 spec:
   podSelector:
     matchLabels:
-      stoppablecontainer.xtlsoft.top/role: provider
+      app.kubernetes.io/name: mount-helper
   policyTypes:
     - Egress
   egress: []  # Deny all egress
 ```
 
+## Provider Pod Security
+
+### No Special Privileges Required
+
+Provider pods run with standard container security:
+
+```yaml
+# No special securityContext needed
+securityContext: {}
+```
+
+The provider pod simply runs the container image's entrypoint. All rootfs sharing is handled by the mount-helper DaemonSet.
+
+### Mitigations
+
+1. **Standard isolation**: Normal container namespace isolation
+2. **No host access**: Cannot access host filesystem directly
+3. **Network policies**: Standard Kubernetes network policies apply
+
 ## Consumer Pod Security
 
-### Capabilities Instead of Privileged
+### No Special Privileges Required
 
-Consumer pods use Linux capabilities instead of privileged mode:
-
-```yaml
-securityContext:
-  capabilities:
-    add:
-      - SYS_ADMIN
-      - SYS_CHROOT
-```
-
-### Why These Capabilities?
-
-| Capability | Required For |
-|------------|--------------|
-| `SYS_ADMIN` | Mounting proc, sys, and dev filesystems |
-| `SYS_CHROOT` | Calling chroot() to enter the rootfs |
-
-### What This Allows
-
-With these capabilities, the container can:
-
-- ✅ Mount filesystems (proc, sys, dev)
-- ✅ Chroot into directories
-- ❌ Access other namespaces
-- ❌ Load kernel modules
-- ❌ Modify system settings
-- ❌ Access raw devices (beyond /dev bind mount)
-
-### Capability Merging
-
-If you specify additional capabilities, they're merged with the required ones:
+Consumer pods also run with standard container security:
 
 ```yaml
-spec:
-  template:
-    container:
-      securityContext:
-        capabilities:
-          add:
-            - NET_ADMIN  # Your additional capability
-            # SYS_ADMIN and SYS_CHROOT added automatically
+# No capabilities needed
+securityContext: {}
 ```
+
+The consumer pod uses the exec-wrapper (`/.sc-bin/sc-exec`) which communicates with the mount-helper DaemonSet to perform chroot operations.
+
+### How exec-wrapper Works Securely
+
+1. Consumer pod starts with a mounted HostPath volume
+2. exec-wrapper sends RPC request to mount-helper DaemonSet
+3. mount-helper (privileged) performs the chroot and executes the command
+4. Output is relayed back to the consumer
+
+This design means the consumer pod itself never needs SYS_ADMIN or SYS_CHROOT capabilities.
 
 ## Isolation Considerations
 
 ### Filesystem Isolation
 
-The consumer container chroots into the extracted rootfs:
+Each StoppableContainerInstance has isolated filesystem via overlayfs:
 
-- ✅ Cannot access host filesystem (except /dev via bind mount)
-- ✅ Has its own proc/sys mounts
-- ⚠️ Shares the rootfs with other consumers of the same instance
+- ✅ Each instance has its own writable layer
+- ✅ Base image (lowerdir) is read-only and shared
+- ✅ Changes are isolated per instance
+- ✅ Cannot access host filesystem
 
 ### Network Isolation
 
-Consumer pods use standard Kubernetes networking:
+All pods use standard Kubernetes networking:
 
 - ✅ Normal pod network policies apply
 - ✅ Can use service mesh
@@ -117,11 +117,12 @@ Consumer pods use standard Kubernetes networking:
 
 ### Process Isolation
 
-Processes run in the consumer container's namespaces:
+Processes run in standard container namespaces:
 
 - ✅ Separate PID namespace
 - ✅ Separate user namespace (if configured)
 - ✅ Standard container isolation
+- ✅ No elevated capabilities in application pods
 
 ## Best Practices
 
@@ -201,21 +202,25 @@ spec:
           memory: "128Mi"
 ```
 
-### 5. Use Read-Only Root Filesystem
+### 5. Secure the mount-helper DaemonSet
 
-For extra security, consider read-only containers:
+The mount-helper is the only privileged component. Protect it:
 
 ```yaml
-spec:
-  template:
-    container:
-      securityContext:
-        readOnlyRootFilesystem: true
+# Restrict who can modify the DaemonSet
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mount-helper-admin
+  namespace: stoppablecontainer-system
+rules:
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    resourceNames: ["mount-helper"]
+    verbs: ["get", "list", "watch"]  # Read-only for most users
 ```
 
-Note: This may require configuring writable volumes for logs/temp files.
-
-### 6. Run as Non-Root
+### 6. Run as Non-Root (Application Pods)
 
 When possible, run as non-root:
 
@@ -235,29 +240,30 @@ spec:
 
 | Threat | Mitigation |
 |--------|------------|
-| Provider pod compromise | Limited attack surface, no secrets, network isolation |
-| Consumer pod escape | Capabilities limited to SYS_ADMIN/SYS_CHROOT |
-| Rootfs tampering | Consider read-only rootfs, use volumes for state |
-| Cross-container attacks | Each instance has separate rootfs |
-| Privilege escalation | Minimal capabilities, non-root when possible |
+| mount-helper compromise | Minimal attack surface, no application code, network isolation |
+| Provider pod compromise | No elevated privileges, standard container isolation |
+| Consumer pod compromise | No elevated privileges, uses exec-wrapper via RPC |
+| Rootfs tampering | Overlayfs isolation per instance, base image read-only |
+| Cross-instance attacks | Each instance has separate overlayfs layers |
+| Privilege escalation | Only DaemonSet is privileged, application pods are standard |
 
 ### Attack Vectors
 
-#### Container Escape via SYS_ADMIN
+#### mount-helper DaemonSet
 
-The SYS_ADMIN capability is powerful but mitigated by:
+The mount-helper is the most sensitive component:
 
-- Chroot environment limits accessible filesystems
-- No access to host processes
-- Standard namespace isolation still applies
+- Runs privileged on every node
+- Mitigated by: minimal functionality, network isolation, audit logging
+- Recommendation: Monitor mount-helper logs and restrict access to its namespace
 
-#### Rootfs Modification
+#### exec-wrapper RPC
 
-Malicious modification of rootfs could affect restarts:
+The exec-wrapper communicates with mount-helper:
 
-- Consider immutable infrastructure patterns
-- Use volumes for any state that shouldn't persist
-- Monitor rootfs for unauthorized changes
+- Uses Unix socket or gRPC
+- Mitigated by: socket permissions, request validation
+- Recommendation: Ensure socket is not accessible outside intended pods
 
 ## Compliance Considerations
 
@@ -265,8 +271,8 @@ Malicious modification of rootfs could affect restarts:
 
 StoppableContainer may require exceptions for:
 
-- CIS Benchmark: 5.2.1 (privileged containers) - Provider only
-- CIS Benchmark: 5.2.7 (NET_RAW capability) - Not required
+- CIS Benchmark: 5.2.1 (privileged containers) - mount-helper DaemonSet only
+- Application pods (provider/consumer): No exceptions needed
 
 Document these exceptions in your security policies.
 

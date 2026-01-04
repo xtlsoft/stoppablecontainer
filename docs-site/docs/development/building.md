@@ -63,6 +63,34 @@ Build the exec wrapper binary:
 go build -o bin/exec-wrapper ./cmd/exec-wrapper
 ```
 
+### Mount Helper
+
+Build the mount helper binary:
+
+```bash
+go build -o bin/mount-helper ./cmd/mount-helper
+```
+
+Build the mount helper Docker image:
+
+```bash
+docker build -t mount-helper:latest -f Dockerfile.mount-helper .
+```
+
+### kubectl-sc Plugin
+
+Build the kubectl plugin:
+
+```bash
+go build -o kubectl-sc ./cmd/kubectl-sc
+```
+
+Install locally:
+
+```bash
+sudo cp kubectl-sc /usr/local/bin/
+```
+
 ### Pause Binary
 
 Build the pause container binary:

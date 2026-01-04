@@ -1,7 +1,7 @@
 # StoppableContainer
 
 <p align="center">
-  <strong>A Kubernetes operator for managing containers with persistent rootfs that can be quickly started and stopped</strong>
+  <strong>A Kubernetes operator for containers with persistent root filesystems</strong>
 </p>
 
 <p align="center">
@@ -15,37 +15,40 @@
 
 ## What is StoppableContainer?
 
-StoppableContainer is a Kubernetes operator that enables **instant container startup** by keeping the root filesystem (rootfs) ready in the background. When you stop a container, only the user process is terminated while the rootfs remains mounted. When you start it again, the container resumes immediately without needing to re-extract the image layers.
+StoppableContainer is a Kubernetes operator that enables containers with **persistent root filesystems**. Unlike regular containers where the root filesystem is ephemeral (lost when the pod is deleted), StoppableContainers preserve their entire filesystem state across stop/start cycles.
 
 This is particularly useful for scenarios like:
 
-- **Development environments** that need to start and stop frequently
-- **Cost optimization** by stopping idle containers while maintaining quick resume times
-- **Educational platforms** where student containers are started on-demand
-- **Serverless-like workloads** that benefit from warm starts
+- **Development environments** - Install packages, configure tools, then stop. When you resume, all your changes are still there
+- **Stateful workloads** - Maintain filesystem modifications without needing to configure external volumes for every directory
+- **Cost optimization** - Stop containers when not in use to save resources, resume with state intact
+- **Educational platforms** - Student containers that preserve their work across sessions
 
 ## Key Features
 
-- 🚀 **Instant Resume**: Start containers in milliseconds instead of seconds
-- 💾 **Persistent Rootfs**: Container filesystem survives restarts
+- 💾 **Persistent Rootfs**: Container filesystem survives stop/start cycles - all installed packages, config files, and modifications are preserved
 - 🔒 **Enhanced Security**: Consumer pods use minimal Linux capabilities instead of full privileged mode
 - ⚡ **Simple API**: Just set `running: true` or `running: false` to control container state
 - 🔄 **Kubernetes Native**: Follows operator pattern and integrates seamlessly with existing clusters
+- 🛠️ **kubectl Plugin**: Easy-to-use CLI for managing StoppableContainers
 
 ## How It Works
 
-StoppableContainer uses a two-pod architecture:
+StoppableContainer uses a DaemonSet-based architecture with three key components:
 
-1. **Provider Pod**: Runs continuously and exposes the container's rootfs via HostPath
-2. **Consumer Pod**: Mounts the rootfs and executes user commands. Created when `running: true`, deleted when `running: false`
+1. **mount-helper DaemonSet**: Runs on each node, handles privileged mount operations
+2. **Provider Pod**: Holds the container's rootfs (non-privileged)
+3. **Consumer Pod**: Executes user commands in the rootfs. Created when `running: true`, deleted when `running: false`
 
 ```mermaid
-graph LR
-    A[StoppableContainer] --> B[Provider Pod]
-    A --> C{running?}
-    C -->|true| D[Consumer Pod]
-    C -->|false| E[No Consumer]
-    B -->|hostPath| D
+graph TD
+    A[StoppableContainer] --> B[StoppableContainerInstance]
+    B --> C[Provider Pod]
+    B --> D{running?}
+    D -->|true| E[Consumer Pod]
+    D -->|false| F[No Consumer]
+    G[mount-helper DaemonSet] -->|mounts rootfs| C
+    G -->|provides rootfs| E
 ```
 
 ## Quick Example
@@ -59,9 +62,28 @@ spec:
   running: true
   template:
     container:
-      image: nginx:latest
-      command: ["nginx", "-g", "daemon off;"]
+      image: ubuntu:22.04
+      command: ["/bin/bash"]
 ```
+
+### Using kubectl-sc (recommended)
+
+```bash
+# Create and start a container
+kubectl sc create my-app --image=ubuntu:22.04 -- /bin/bash
+
+# Install packages (these will persist!)
+kubectl sc exec my-app -- apt update
+kubectl sc exec my-app -- apt install -y python3 nodejs
+
+# Stop the container (preserves all installed packages)
+kubectl sc stop my-app
+
+# Resume later (all your packages are still there)
+kubectl sc start my-app
+```
+
+### Using kubectl
 
 To stop the container:
 
@@ -95,11 +117,18 @@ kubectl patch stoppablecontainer my-app --type=merge -p '{"spec":{"running":true
               ▼                              ▼
 ┌─────────────────────────┐    ┌─────────────────────────┐
 │      Provider Pod        │    │      Consumer Pod        │
-│  ├── pause container     │    │  ├── exec-wrapper-init   │
+│  ├── rootfs container    │    │  ├── init container      │
+│  │   (user image+pause)  │    │  │   (copy exec-wrapper)  │
 │  └── provider container  │──▶│  └── consumer container  │
-│      (export rootfs)     │    │      (user command)      │
+│      (request mount)     │    │      (chroot + command)  │
 └─────────────────────────┘    └─────────────────────────┘
          Always Running              Created when running=true
+                        ▲
+                        │ overlayfs mount
+┌───────────────────────┴─────────────────────────────────────────┐
+│                   mount-helper DaemonSet                         │
+│  (Privileged, runs on every node, handles mount operations)     │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Next Steps

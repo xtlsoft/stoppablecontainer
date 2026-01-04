@@ -4,16 +4,16 @@
 
 ### What is StoppableContainer?
 
-StoppableContainer is a Kubernetes operator that manages containers with persistent root filesystems. It enables near-instant container starts by keeping the filesystem pre-extracted and ready.
+StoppableContainer is a Kubernetes operator that manages containers with persistent root filesystems. It enables filesystem changes to survive container restarts - something not possible with regular Kubernetes pods.
 
 ### Why would I use this instead of regular Pods?
 
 StoppableContainer is beneficial when:
 
-- You need fast container starts (sub-100ms)
-- Containers are frequently started and stopped
-- You want to reduce image extraction overhead
-- You're building on-demand or serverless-like workloads
+- You need filesystem changes to persist across restarts
+- You want to install packages or modify files and keep them after restart
+- You're building development environments or long-running interactive workloads
+- You need an environment that "remembers" its state
 
 ### Is this production-ready?
 
@@ -32,9 +32,14 @@ This allows the rootfs to persist while the user workload can be quickly started
 
 ### Why does the provider pod need privileged mode?
 
-Kubernetes requires `privileged: true` for Bidirectional mount propagation. The provider needs this to share the rootfs with the host and consumer pods.
+It doesn't! With the DaemonSet architecture, the **mount-helper DaemonSet** handles all privileged operations. Provider and consumer pods run with standard container privileges.
 
-See: [Kubernetes Mount Propagation](https://kubernetes.io/docs/concepts/storage/volumes/#mount-propagation)
+The mount-helper DaemonSet is privileged because it needs to:
+- Create overlayfs mounts
+- Perform bind mounts
+- Execute chroot operations
+
+This centralizes privilege to a single, auditable component.
 
 ### Can I run multiple consumers from one provider?
 
@@ -42,26 +47,32 @@ Currently, each StoppableContainer has one provider and one consumer. Multiple c
 
 ## Security
 
-### Is it safe to run privileged containers?
+### Is it safe to run the mount-helper DaemonSet?
 
-The provider pod runs privileged but:
+The mount-helper DaemonSet runs privileged but:
 
-- Runs a minimal script (no complex application code)
-- Has no network access needs (can be blocked with NetworkPolicy)
-- Doesn't mount secrets or sensitive data
+- Only performs mount/chroot operations (no application code)
+- Single instance per node (easy to audit)
+- Can be isolated with NetworkPolicy
+- Doesn't process user data
 
-The consumer pod uses only `SYS_ADMIN` and `SYS_CHROOT` capabilities, significantly reducing attack surface compared to privileged mode.
+Application pods (provider and consumer) run with **no special privileges**.
 
 ### Can users escape the container?
 
-Consumer containers use standard container isolation (namespaces, cgroups) plus chroot. The capabilities granted are the minimum required for operation.
+Consumer containers use:
+- Standard container isolation (namespaces, cgroups)
+- Overlayfs for filesystem isolation
+- exec-wrapper for chroot operations (handled by mount-helper)
+
+The consumer pod itself has no special capabilities.
 
 ### How do I secure StoppableContainer workloads?
 
+- Secure the mount-helper DaemonSet namespace
 - Use NetworkPolicy to restrict traffic
 - Apply resource limits
 - Run as non-root when possible
-- Use read-only root filesystem for immutable containers
 - Implement RBAC to control who can create StoppableContainers
 
 ## Functionality
@@ -86,12 +97,12 @@ No, currently you must delete and recreate the StoppableContainer to update the 
 
 The first start includes:
 
-1. Scheduling provider pod
+1. Scheduling provider pod and mount-helper setup
 2. Pulling the image
-3. Extracting rootfs
+3. Creating overlayfs mount
 4. Starting consumer
 
-Subsequent starts are much faster because the rootfs is already prepared.
+Subsequent starts are faster because the overlayfs layers are already prepared.
 
 ### Can I use custom entrypoints?
 
@@ -113,21 +124,26 @@ container:
    kubectl get pod <name>-provider
    ```
 
-2. Check events:
+2. Check if mount-helper DaemonSet is running:
+   ```bash
+   kubectl get daemonset -n stoppablecontainer-system mount-helper
+   ```
+
+3. Check events:
    ```bash
    kubectl describe stoppablecontainer <name>
    ```
 
-3. Check controller logs:
+4. Check controller logs:
    ```bash
    kubectl logs -n stoppablecontainer-system -l control-plane=controller-manager
    ```
 
 ### Consumer won't start
 
-1. Verify rootfs is ready:
+1. Check mount-helper logs:
    ```bash
-   kubectl exec <name>-provider -c provider -- cat /rootfs/ready
+   kubectl logs -n stoppablecontainer-system -l app.kubernetes.io/name=mount-helper
    ```
 
 2. Check consumer pod events:
@@ -177,8 +193,8 @@ Kubernetes 1.25 and later are officially supported.
 
 Yes, StoppableContainer works on managed Kubernetes clusters. Ensure:
 
-- cert-manager is installed
-- Nodes allow privileged containers (usually enabled by default)
+- cert-manager is installed (for controller)
+- mount-helper DaemonSet can run privileged (usually enabled by default)
 - HostPath volumes are supported
 
 ### Does it work with containerd / CRI-O?
@@ -197,12 +213,12 @@ Yes, but consider:
 
 ### How fast is container start?
 
-Typical startup times:
+The primary goal of StoppableContainer is **persistent rootfs**, not startup speed. However, you may see some improvement:
 
 | Scenario | Time |
 |----------|------|
 | First start (cold) | 5-30 seconds (image dependent) |
-| Subsequent starts (warm) | 50-100 milliseconds |
+| Subsequent starts (warm) | A few seconds |
 
 ### What's the memory overhead?
 

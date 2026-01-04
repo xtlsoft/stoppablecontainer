@@ -1,10 +1,27 @@
 # Quick Start
 
-This guide helps you create your first StoppableContainer and understand its basic operations.
+This guide helps you create your first StoppableContainer and understand how the persistent rootfs works.
+
+## Prerequisites
+
+Make sure StoppableContainer is installed. See the [Installation Guide](installation.md) for details.
+
+Optionally, install the kubectl-sc plugin for easier management:
+
+```bash
+go install github.com/xtlsoft/stoppablecontainer/cmd/kubectl-sc@latest
+```
 
 ## Create a Simple StoppableContainer
 
-Let's create a simple container running a shell loop:
+### Using kubectl-sc (Recommended)
+
+```bash
+# Create and start a container
+kubectl sc create demo --image=ubuntu:22.04 -- /bin/bash -c "while true; do date; sleep 5; done"
+```
+
+### Using YAML
 
 ```yaml
 # my-stoppable.yaml
@@ -17,9 +34,9 @@ spec:
   running: true
   template:
     container:
-      image: busybox:stable
-      command: ["/bin/sh", "-c"]
-      args: ["echo 'Container started!'; while true; do date; sleep 5; done"]
+      image: ubuntu:22.04
+      command: ["/bin/bash", "-c"]
+      args: ["while true; do date; sleep 5; done"]
 ```
 
 Apply the manifest:
@@ -73,6 +90,10 @@ kubectl logs demo-consumer
 To stop the container while preserving the rootfs:
 
 ```bash
+# Using kubectl-sc
+kubectl sc stop demo
+
+# Or using kubectl
 kubectl patch stoppablecontainer demo --type=merge -p '{"spec":{"running":false}}'
 ```
 
@@ -96,17 +117,21 @@ NAME            READY   STATUS    RESTARTS   AGE
 demo-provider   2/2     Running   0          3m
 ```
 
-Notice the provider pod is still running, keeping the rootfs ready.
+Notice the provider pod is still running, keeping the rootfs intact with any modifications you made.
 
 ## Resume the Container
 
 Start the container again:
 
 ```bash
+# Using kubectl-sc
+kubectl sc start demo
+
+# Or using kubectl
 kubectl patch stoppablecontainer demo --type=merge -p '{"spec":{"running":true}}'
 ```
 
-The consumer pod starts almost instantly:
+The consumer pod is recreated with the preserved rootfs:
 
 ```bash
 kubectl get pods
@@ -123,49 +148,49 @@ demo-consumer   1/1     Running   0          2s
 Delete the StoppableContainer:
 
 ```bash
+# Using kubectl-sc
+kubectl sc delete demo
+
+# Or using kubectl
 kubectl delete stoppablecontainer demo
 ```
 
 Both pods will be cleaned up automatically.
 
-## A More Practical Example
+## Demonstrating Persistent Rootfs
 
-Here's a more realistic example with an Nginx web server:
-
-```yaml
-apiVersion: stoppablecontainer.xtlsoft.top/v1alpha1
-kind: StoppableContainer
-metadata:
-  name: web-server
-  namespace: default
-spec:
-  running: true
-  template:
-    container:
-      image: nginx:alpine
-      command: ["nginx", "-g", "daemon off;"]
-    nodeSelector:
-      kubernetes.io/os: linux
-    tolerations:
-      - key: "node-role.kubernetes.io/master"
-        operator: "Exists"
-        effect: "NoSchedule"
-```
-
-Apply and verify:
+Let's demonstrate the key feature - filesystem persistence:
 
 ```bash
-kubectl apply -f web-server.yaml
+# Create a container
+kubectl sc create mydev --image=ubuntu:22.04 -- sleep infinity
 
-# Check status
-kubectl get stoppablecontainer web-server
+# Install a package (this would be lost in normal containers)
+kubectl sc exec mydev -- apt update
+kubectl sc exec mydev -- apt install -y curl
 
-# Access nginx (from within cluster)
-kubectl exec demo-consumer -- curl localhost
+# Create a file
+kubectl sc exec mydev -- bash -c "echo 'Hello World' > /my-file.txt"
+
+# Stop the container
+kubectl sc stop mydev --wait
+
+# Start it again
+kubectl sc start mydev --wait
+
+# Verify the file and package are still there!
+kubectl sc exec mydev -- cat /my-file.txt
+kubectl sc exec mydev -- curl --version
+
+# Clean up
+kubectl sc delete mydev
 ```
+
+The installed package (`curl`) and created file (`/my-file.txt`) persist across stop/start cycles.
 
 ## What's Next?
 
 - [Configuration Guide](configuration.md) - Customize container behavior
+- [kubectl Plugin Guide](../user-guide/kubectl-plugin.md) - Full CLI reference
 - [Architecture](../concepts/architecture.md) - Understand how it works
 - [Managing Lifecycle](../user-guide/lifecycle.md) - Advanced lifecycle operations

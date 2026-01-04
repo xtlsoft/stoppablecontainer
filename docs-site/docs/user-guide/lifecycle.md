@@ -123,14 +123,28 @@ kubectl logs my-app-provider -c provider
 
 ## Executing Commands
 
-### In Running Consumer
+### Using kubectl-sc (Recommended)
+
+The `kubectl-sc` plugin automatically handles exec-wrapper:
 
 ```bash
 # Single command
-kubectl exec my-app-consumer -- ls -la /
+kubectl sc exec my-app -- ls -la /
 
 # Interactive shell
-kubectl exec -it my-app-consumer -- /bin/bash
+kubectl sc exec my-app -- /bin/bash
+```
+
+### Using kubectl exec Directly
+
+When using kubectl directly, you must use the exec-wrapper:
+
+```bash
+# Single command (note: use /.sc-bin/sc-exec)
+kubectl exec my-app-consumer -- /.sc-bin/sc-exec ls -la /
+
+# Interactive shell
+kubectl exec -it my-app-consumer -- /.sc-bin/sc-exec /bin/bash
 ```
 
 ### In Provider (Debugging)

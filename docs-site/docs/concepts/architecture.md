@@ -4,7 +4,14 @@ This document explains the architectural design of StoppableContainer.
 
 ## Overview
 
-StoppableContainer is designed as a Kubernetes operator that separates container lifecycle management from the root filesystem. This enables near-instant container starts by keeping the filesystem pre-extracted and mounted.
+StoppableContainer is designed as a Kubernetes operator that enables containers with **persistent root filesystems**. Unlike regular containers where the root filesystem is ephemeral (lost when the pod is deleted), StoppableContainers preserve the filesystem state across stop/start cycles.
+
+## Key Design Goals
+
+1. **Persistent Rootfs**: All filesystem modifications survive container restarts
+2. **Security**: No privileged user workloads - all privileged operations are centralized
+3. **Compatibility**: Works with any container image, including scratch/distroless
+4. **Kubernetes Native**: Follows operator patterns and integrates seamlessly
 
 ## Components
 
@@ -62,44 +69,61 @@ The controller manager watches for StoppableContainer and StoppableContainerInst
 └──────────────────────────┴──────────────────────────────────────┘
 ```
 
+### mount-helper DaemonSet
+
+The mount-helper is a **privileged DaemonSet** that runs on every node and handles all mount operations:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                   mount-helper DaemonSet                         │
+│  (One pod per node, privileged)                                 │
+├─────────────────────────────────────────────────────────────────┤
+│  Responsibilities:                                              │
+│  • Scans /proc for provider containers (ROOTFS_MARKER=true)     │
+│  • Creates overlayfs mounts from container filesystem           │
+│  • Mounts /proc, /dev, /sys for consumer pods                   │
+│  • Signals readiness via ready.json                             │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Why a DaemonSet?**
+
+- **Centralized privilege**: Only the DaemonSet runs with elevated privileges
+- **Audit**: All mount operations go through a single, auditable component  
+- **Security**: User workloads never need CAP_SYS_ADMIN
+
 ### Pod Architecture
 
 Each StoppableContainerInstance creates two pods:
 
 #### Provider Pod
 
-The provider pod runs continuously and is responsible for:
-
-1. **Extracting the container image** to a known path
-2. **Sharing the rootfs** via HostPath volumes
-3. **Signaling readiness** to consumer pods
-
-Structure:
+The provider pod runs continuously and holds the container's rootfs:
 
 ```
 ┌─────────────────────────────────────────┐
 │              Provider Pod                │
+│              (NOT privileged)            │
 ├─────────────────┬───────────────────────┤
-│  pause          │  provider             │
+│  rootfs         │  provider             │
 │  container      │  container            │
 │  ────────────   │  ────────────────     │
-│  Holds network  │  • Extracts image     │
-│  namespace      │  • Mounts rootfs      │
-│                 │  • Creates ready file │
-│                 │  • Runs forever       │
+│  User's image   │  • Writes request.json│
+│  + pause binary │  • Waits for ready.json│
+│  Holds rootfs   │  • Runs forever       │
 └─────────────────┴───────────────────────┘
         │
-        │ HostPath: /var/lib/stoppable-container/{instance}
+        │ mount-helper reads container's /proc/<pid>/root
+        │ and creates overlayfs mount at hostPath
         ▼
 ┌─────────────────────────────────────────┐
 │              Consumer Pod                │
+│              (Only CAP_SYS_CHROOT)       │
 ├─────────────────┬───────────────────────┤
-│  exec-wrapper   │  consumer             │
-│  init           │  container            │
-│  ────────────   │  ────────────────     │
-│  Copies exec    │  • Waits for rootfs   │
-│  wrapper binary │  • Mounts proc/sys    │
-│                 │  • Chroots into rootfs│
+│  init container │  consumer             │
+│  ────────────   │  container            │
+│  Copies exec    │  • Mounts hostPath    │
+│  wrapper binary │  • Chroots into rootfs│
 │                 │  • Execs user command │
 └─────────────────┴───────────────────────┘
 ```
@@ -114,6 +138,7 @@ sequenceDiagram
     participant K8s API
     participant SC Controller
     participant SCI Controller
+    participant mount-helper
     participant Provider
     participant Consumer
 
@@ -122,11 +147,12 @@ sequenceDiagram
     SC Controller->>K8s API: Create StoppableContainerInstance
     K8s API->>SCI Controller: Notify new SCI
     SCI Controller->>K8s API: Create Provider Pod
-    Provider->>Provider: Extract image, mount rootfs
-    Provider->>Provider: Create ready file
+    Provider->>Provider: Write request.json
+    mount-helper->>Provider: Scan for ROOTFS_MARKER
+    mount-helper->>mount-helper: Create overlayfs mount
+    mount-helper->>Provider: Write ready.json
     SCI Controller->>K8s API: Create Consumer Pod
-    Consumer->>Consumer: Wait for ready file
-    Consumer->>Consumer: Mount proc/sys/dev
+    Consumer->>Consumer: Wait for rootfs mount
     Consumer->>Consumer: Chroot into rootfs
     Consumer->>Consumer: Exec user command
 ```
@@ -144,12 +170,12 @@ sequenceDiagram
     User->>SC Controller: Set running=false
     SC Controller->>SCI Controller: Update SCI.running=false
     SCI Controller->>Consumer: Delete Consumer Pod
-    Note over Provider: Provider stays running
+    Note over Provider: Provider stays running<br/>Rootfs preserved
     
     User->>SC Controller: Set running=true
     SC Controller->>SCI Controller: Update SCI.running=true
     SCI Controller->>Consumer: Create new Consumer Pod
-    Note over Consumer: Instant start - rootfs ready
+    Note over Consumer: Rootfs already mounted<br/>All modifications preserved
 ```
 
 ## Storage Architecture
@@ -188,23 +214,32 @@ volumeMounts:
 
 ## Security Model
 
-### Provider Pod Security
+### DaemonSet-Based Architecture
 
-The provider pod requires privileged mode because:
+StoppableContainer uses a centralized security model where all privileged operations are handled by the mount-helper DaemonSet:
 
-- Kubernetes requires `privileged: true` for Bidirectional mount propagation
-- It needs to mount the container filesystem
+| Component | Privilege Level | Notes |
+|-----------|----------------|-------|
+| mount-helper DaemonSet | Privileged | One per node, centrally managed |
+| Provider Pod | **Non-privileged** | No special capabilities needed |
+| Consumer Pod | CAP_SYS_CHROOT only | Minimal privilege for chroot |
+
+### Key Security Benefits
+
+1. **No privileged user workloads** - User code never runs with elevated privileges
+2. **Centralized audit** - All mount operations go through the DaemonSet
+3. **Reduced blast radius** - Compromise of user pod doesn't grant mount capabilities
+4. **Pod Security Standards compatible** - Consumer pods can run with restricted PSS
 
 ### Consumer Pod Security
 
-The consumer pod uses minimal capabilities instead of privileged mode:
+The consumer pod uses minimal capabilities:
 
 | Capability | Purpose |
 |------------|---------|
-| `SYS_ADMIN` | Mounting proc, sys, dev filesystems |
 | `SYS_CHROOT` | Chrooting into the rootfs |
 
-This is a significant security improvement over running fully privileged.
+**Note**: The consumer does NOT need `CAP_SYS_ADMIN` - the DaemonSet handles all mount operations.
 
 ## Reconciliation Logic
 

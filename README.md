@@ -4,7 +4,14 @@
 [![E2E Tests](https://github.com/xtlsoft/stoppablecontainer/actions/workflows/test-e2e.yml/badge.svg)](https://github.com/xtlsoft/stoppablecontainer/actions/workflows/test-e2e.yml)
 [![Lint](https://github.com/xtlsoft/stoppablecontainer/actions/workflows/lint.yml/badge.svg)](https://github.com/xtlsoft/stoppablecontainer/actions/workflows/lint.yml)
 
-StoppableContainer is a Kubernetes operator that enables **stoppable containers** - containers whose ephemeral filesystem persists even when the workload is not running. This is similar to how KubeVirt handles VMs with VirtualMachine and VirtualMachineInstance.
+StoppableContainer is a Kubernetes operator that enables containers with **persistent root filesystems**. Unlike regular containers where the root filesystem is ephemeral (lost when the pod is deleted), StoppableContainers preserve their entire filesystem state across stop/start cycles.
+
+**Key Use Cases:**
+- **Development environments** - Install packages, configure tools, stop when not in use, resume with all changes intact
+- **Stateful workloads** - Preserve filesystem modifications without external volumes
+- **Cost optimization** - Stop containers to save resources while maintaining their state
+
+This is similar to how KubeVirt handles VMs with VirtualMachine and VirtualMachineInstance.
 
 ## How It Works
 
@@ -225,8 +232,8 @@ kubectl sc exec my-container -- /bin/bash
 # View logs
 kubectl sc logs my-container -f
 
-# Create a new StoppableContainer
-kubectl sc create my-nginx --image nginx:latest --start
+# Create a new StoppableContainer (starts by default)
+kubectl sc create my-nginx --image=nginx:latest
 ```
 
 For full documentation, see the [kubectl Plugin Guide](https://xtlsoft.github.io/stoppablecontainer/user-guide/kubectl-plugin/).
@@ -245,7 +252,7 @@ This deletes both pods and the preserved filesystem.
 
 | Field | Description | Default |
 |-------|-------------|---------|
-| `spec.running` | Whether the container should be running | `false` |
+| `spec.running` | Whether the container should be running | `true` |
 | `spec.template.container.image` | Container image | Required |
 | `spec.template.container.command` | Command to run | Image default |
 | `spec.template.container.args` | Command arguments | - |
