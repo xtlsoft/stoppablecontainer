@@ -1,0 +1,29 @@
+# This rule is not used by the project stoppablecontainer itself.
+# It is provided to allow the cluster admin to help manage permissions for users.
+#
+# Grants read-only access to stoppablecontainer.xtlsoft.top resources.
+# This role is intended for users who need visibility into these resources
+# without permissions to modify them. It is ideal for monitoring purposes and limited-access viewing.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: stoppablecontainer
+    app.kubernetes.io/managed-by: kustomize
+  name: stoppablecontainerinstance-viewer-role
+rules:
+- apiGroups:
+  - stoppablecontainer.xtlsoft.top
+  resources:
+  - stoppablecontainerinstances
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - stoppablecontainer.xtlsoft.top
+  resources:
+  - stoppablecontainerinstances/status
+  verbs:
+  - get

@@ -1,0 +1,62 @@
+apiVersion: stoppablecontainer.xtlsoft.top/v1alpha1
+kind: StoppableContainer
+metadata:
+  name: example
+  labels:
+    app.kubernetes.io/name: stoppablecontainer
+    app.kubernetes.io/instance: example
+spec:
+  # Set to true to start the container, false to stop (preserving filesystem)
+  running: true
+  
+  template:
+    metadata:
+      labels:
+        app: example
+    container:
+      # The actual image you want to run
+      image: ubuntu:22.04
+      
+      # Command to run inside the container
+      command:
+        - /bin/bash
+        - -c
+        - |
+          echo "Hello from StoppableContainer!"
+          echo "Creating a test file..."
+          echo "This file persists across stops!" > /tmp/persistent-test.txt
+          echo "Sleeping forever..."
+          sleep infinity
+      
+      # Resource requirements for the consumer (workload) pod
+      resources:
+        requests:
+          memory: "256Mi"
+          cpu: "250m"
+        limits:
+          memory: "512Mi"
+          cpu: "500m"
+      
+      # Environment variables
+      env:
+        - name: MY_VAR
+          value: "hello-world"
+    
+    # Additional volumes can be added here
+    # volumes:
+    #   - name: data
+    #     persistentVolumeClaim:
+    #       claimName: my-pvc
+  
+  # Provider pod configuration (minimal resources for filesystem holding)
+  provider:
+    resources:
+      requests:
+        memory: "32Mi"
+        cpu: "10m"
+      limits:
+        memory: "64Mi"
+        cpu: "100m"
+  
+  # Host path prefix for mount propagation
+  hostPathPrefix: "/var/lib/stoppablecontainer"

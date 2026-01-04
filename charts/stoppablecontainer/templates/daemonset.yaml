@@ -1,0 +1,59 @@
+{{- if .Values.mountHelper.enabled }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "stoppablecontainer.fullname" . }}-mount-helper
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "stoppablecontainer.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mount-helper
+spec:
+  selector:
+    matchLabels:
+      {{- include "stoppablecontainer.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mount-helper
+  template:
+    metadata:
+      labels:
+        {{- include "stoppablecontainer.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: mount-helper
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "stoppablecontainer.serviceAccountName" . }}-mount-helper
+      hostPID: true
+      containers:
+        - name: mount-helper
+          image: {{ include "stoppablecontainer.mountHelperImage" . }}
+          imagePullPolicy: {{ .Values.mountHelper.image.pullPolicy }}
+          securityContext:
+            privileged: true
+          resources:
+            {{- toYaml .Values.mountHelper.resources | nindent 12 }}
+          volumeMounts:
+            - name: host-root
+              mountPath: /host
+              mountPropagation: Bidirectional
+            - name: work-dir
+              mountPath: /host{{ .Values.global.hostPathPrefix }}
+              mountPropagation: Bidirectional
+      volumes:
+        - name: host-root
+          hostPath:
+            path: /
+            type: Directory
+        - name: work-dir
+          hostPath:
+            path: {{ .Values.global.hostPathPrefix }}
+            type: DirectoryOrCreate
+      {{- with .Values.mountHelper.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.mountHelper.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

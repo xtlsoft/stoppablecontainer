@@ -1,0 +1,100 @@
+# Default values for stoppablecontainer.
+
+# Controller configuration
+controller:
+  image:
+    repository: ghcr.io/xtlsoft/stoppablecontainer
+    tag: ""  # Defaults to appVersion
+    pullPolicy: IfNotPresent
+  
+  replicas: 1
+  
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 10m
+      memory: 64Mi
+  
+  # Node selector for controller
+  nodeSelector: {}
+  
+  # Tolerations for controller
+  tolerations: []
+  
+  # Affinity for controller
+  affinity: {}
+
+# Mount-helper DaemonSet configuration
+mountHelper:
+  enabled: true
+  image:
+    repository: ghcr.io/xtlsoft/stoppablecontainer-mount-helper
+    tag: ""  # Defaults to appVersion
+    pullPolicy: IfNotPresent
+  
+  resources:
+    limits:
+      cpu: 100m
+      memory: 64Mi
+    requests:
+      cpu: 10m
+      memory: 32Mi
+  
+  # Node selector for mount-helper (runs on all nodes by default)
+  nodeSelector: {}
+  
+  # Tolerations for mount-helper (tolerates all taints by default)
+  tolerations:
+    - operator: Exists
+
+# Exec-wrapper image (used by consumer pods)
+execWrapper:
+  image:
+    repository: ghcr.io/xtlsoft/stoppablecontainer-exec
+    tag: ""  # Defaults to appVersion
+
+# Pause image (used by provider pods)
+pause:
+  image:
+    repository: ghcr.io/xtlsoft/stoppablecontainer-exec
+    tag: ""  # Same as exec-wrapper
+
+# Global settings
+global:
+  # Image pull secrets
+  imagePullSecrets: []
+  
+  # Host path prefix for mount propagation
+  hostPathPrefix: /var/lib/stoppablecontainer
+
+# Namespace to deploy to
+namespace: stoppablecontainer-system
+
+# Service account settings
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# RBAC settings
+rbac:
+  create: true
+
+# Metrics settings
+metrics:
+  enabled: true
+  service:
+    port: 8443
+    type: ClusterIP
+
+# Pod security settings
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+# Leader election settings
+leaderElection:
+  enabled: true

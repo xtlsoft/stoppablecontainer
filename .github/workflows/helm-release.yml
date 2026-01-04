@@ -1,0 +1,63 @@
+name: Helm Chart Release
+
+on:
+  push:
+    paths:
+      - 'charts/**'
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Package Helm chart
+        run: |
+          mkdir -p .helm-packages
+          helm package charts/stoppablecontainer -d .helm-packages
+
+      - name: Update Helm repository index
+        run: |
+          # Checkout gh-pages branch if it exists, otherwise create it
+          if git show-ref --quiet refs/remotes/origin/gh-pages; then
+            git fetch origin gh-pages
+            git checkout gh-pages
+            git checkout main -- charts/
+          else
+            git checkout --orphan gh-pages
+            git rm -rf .
+          fi
+          
+          # Move packaged charts
+          mkdir -p charts
+          mv .helm-packages/*.tgz charts/ 2>/dev/null || true
+          
+          # Generate index
+          if [ -f charts/index.yaml ]; then
+            helm repo index charts --merge charts/index.yaml --url https://xtlsoft.github.io/stoppablecontainer/charts
+          else
+            helm repo index charts --url https://xtlsoft.github.io/stoppablecontainer/charts
+          fi
+          
+          # Commit and push
+          git add charts/
+          git commit -m "Update Helm chart repository" || echo "No changes to commit"
+          git push origin gh-pages

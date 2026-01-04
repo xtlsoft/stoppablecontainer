@@ -1,0 +1,22 @@
+# Build the exec-wrapper and pause binaries
+FROM golang:1 AS builder
+ARG TARGETOS
+ARG TARGETARCH
+
+WORKDIR /workspace
+COPY go.mod go.mod
+COPY go.sum go.sum
+RUN go mod download
+
+COPY cmd/exec-wrapper/ cmd/exec-wrapper/
+COPY cmd/pause/ cmd/pause/
+
+# Build both binaries as static executables
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -a -o sc-exec cmd/exec-wrapper/main.go
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -a -o sc-pause cmd/pause/main.go
+
+# Use busybox for shell support in init container
+FROM busybox:stable
+COPY --from=builder /workspace/sc-exec /sc-exec
+COPY --from=builder /workspace/sc-pause /sc-pause
+ENTRYPOINT ["/sc-exec"]

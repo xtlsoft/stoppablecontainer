@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: stoppablecontainer-system
+namePrefix: stoppablecontainer-
+
+resources:
+- daemonset.yaml
+- serviceaccount.yaml
+
+images:
+- name: mount-helper
+  newName: mount-helper
+  newTag: latest

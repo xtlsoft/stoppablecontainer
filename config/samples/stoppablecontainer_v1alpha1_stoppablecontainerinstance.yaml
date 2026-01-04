@@ -1,0 +1,36 @@
+apiVersion: stoppablecontainer.xtlsoft.top/v1alpha1
+kind: StoppableContainerInstance
+metadata:
+  name: example
+  labels:
+    app.kubernetes.io/name: stoppablecontainer
+    app.kubernetes.io/instance: example
+spec:
+  # Reference to parent StoppableContainer
+  stoppableContainerName: example
+  
+  # Whether the consumer should be running
+  running: true
+  
+  template:
+    container:
+      image: ubuntu:22.04
+      command:
+        - /bin/bash
+        - -c
+        - sleep infinity
+      resources:
+        requests:
+          memory: "256Mi"
+          cpu: "250m"
+        limits:
+          memory: "512Mi"
+          cpu: "500m"
+  
+  provider:
+    resources:
+      requests:
+        memory: "32Mi"
+        cpu: "10m"
+  
+  hostPathPrefix: "/var/lib/stoppablecontainer"

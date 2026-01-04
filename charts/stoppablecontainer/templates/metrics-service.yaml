@@ -1,0 +1,19 @@
+{{- if .Values.metrics.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "stoppablecontainer.fullname" . }}-metrics
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "stoppablecontainer.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.metrics.service.type }}
+  ports:
+    - name: https
+      port: {{ .Values.metrics.service.port }}
+      targetPort: https
+      protocol: TCP
+  selector:
+    {{- include "stoppablecontainer.selectorLabels" . | nindent 4 }}
+    control-plane: controller-manager
+{{- end }}

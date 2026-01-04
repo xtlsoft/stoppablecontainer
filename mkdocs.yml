@@ -1,0 +1,105 @@
+site_name: StoppableContainer
+site_description: A Kubernetes operator for managing containers with persistent rootfs that can be quickly started and stopped
+site_author: xtlsoft
+site_url: https://xtlsoft.github.io/stoppablecontainer/
+
+repo_name: xtlsoft/stoppablecontainer
+repo_url: https://github.com/xtlsoft/stoppablecontainer
+
+docs_dir: docs-site/docs
+
+theme:
+  name: material
+  language: en
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+
+plugins:
+  - search
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quickstart.md
+      - Configuration: getting-started/configuration.md
+  - Concepts:
+      - Architecture: concepts/architecture.md
+      - How It Works: concepts/how-it-works.md
+      - Security: concepts/security.md
+  - User Guide:
+      - Creating StoppableContainers: user-guide/creating.md
+      - Managing Lifecycle: user-guide/lifecycle.md
+      - Advanced Usage: user-guide/advanced.md
+  - API Reference:
+      - StoppableContainer: api-reference/stoppablecontainer.md
+      - StoppableContainerInstance: api-reference/stoppablecontainerinstance.md
+  - Development:
+      - Contributing: development/contributing.md
+      - Building: development/building.md
+      - Testing: development/testing.md
+  - FAQ: faq.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/xtlsoft/stoppablecontainer
