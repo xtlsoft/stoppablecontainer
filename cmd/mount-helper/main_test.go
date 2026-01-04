@@ -20,9 +20,10 @@ func TestAdjustPathsForHost(t *testing.T) {
 			expected: "lowerdir=/host/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/1/fs",
 		},
 		{
-			name:     "multiple paths",
-			input:    "lowerdir=/var/lib/containerd/a,upperdir=/var/lib/containerd/b,workdir=/var/lib/containerd/c",
-			expected: "lowerdir=/host/var/lib/containerd/a,upperdir=/host/var/lib/containerd/b,workdir=/host/var/lib/containerd/c",
+			name:  "multiple paths",
+			input: "lowerdir=/var/lib/containerd/a,upperdir=/var/lib/containerd/b,workdir=/var/lib/containerd/c",
+			expected: "lowerdir=/host/var/lib/containerd/a," +
+				"upperdir=/host/var/lib/containerd/b,workdir=/host/var/lib/containerd/c",
 		},
 		{
 			name:     "no containerd paths",
@@ -83,7 +84,7 @@ func TestWriteResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Write a response
 	response := MountResponse{

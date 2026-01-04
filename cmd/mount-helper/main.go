@@ -106,7 +106,7 @@ func scanAndProcessRequests() error {
 		if err := processRequest(workDir, requestFile); err != nil {
 			log.Error(err, "failed to process request", "workDir", workDir)
 			// Write error response
-			writeResponse(workDir, MountResponse{
+			_ = writeResponse(workDir, MountResponse{
 				Status:  "error",
 				Message: err.Error(),
 			})
@@ -175,7 +175,7 @@ func processRequest(workDir, requestFile string) error {
 	}
 
 	// Write ready response
-	writeResponse(workDir, MountResponse{Status: "ready"})
+	_ = writeResponse(workDir, MountResponse{Status: "ready"})
 
 	log.Info("mount complete", "workDir", workDir)
 	return nil
@@ -233,7 +233,7 @@ func getOverlayfsOptions(pid int) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to open mounts: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -293,7 +293,7 @@ func mountProcDevSys(rootfsDir string) error {
 		errs = append(errs, fmt.Sprintf("dev: %v", err))
 	} else {
 		// Make it rslave to prevent propagation back
-		syscall.Mount("", devDir, "", syscall.MS_SLAVE|syscall.MS_REC, "")
+		_ = syscall.Mount("", devDir, "", syscall.MS_SLAVE|syscall.MS_REC, "")
 	}
 
 	// Bind mount sys from host
@@ -305,7 +305,7 @@ func mountProcDevSys(rootfsDir string) error {
 		errs = append(errs, fmt.Sprintf("sys: %v", err))
 	} else {
 		// Make it rslave to prevent propagation back
-		syscall.Mount("", sysDir, "", syscall.MS_SLAVE|syscall.MS_REC, "")
+		_ = syscall.Mount("", sysDir, "", syscall.MS_SLAVE|syscall.MS_REC, "")
 	}
 
 	// Also mount /dev/pts and /dev/shm if they exist
@@ -313,7 +313,7 @@ func mountProcDevSys(rootfsDir string) error {
 	hostDevPts := filepath.Join(HostRootPath, "dev", "pts")
 	if _, err := os.Stat(hostDevPts); err == nil {
 		if err := os.MkdirAll(devPtsDir, 0755); err == nil {
-			syscall.Mount(hostDevPts, devPtsDir, "", syscall.MS_BIND, "")
+			_ = syscall.Mount(hostDevPts, devPtsDir, "", syscall.MS_BIND, "")
 		}
 	}
 
@@ -321,7 +321,7 @@ func mountProcDevSys(rootfsDir string) error {
 	hostDevShm := filepath.Join(HostRootPath, "dev", "shm")
 	if _, err := os.Stat(hostDevShm); err == nil {
 		if err := os.MkdirAll(devShmDir, 0755); err == nil {
-			syscall.Mount(hostDevShm, devShmDir, "", syscall.MS_BIND, "")
+			_ = syscall.Mount(hostDevShm, devShmDir, "", syscall.MS_BIND, "")
 		}
 	}
 

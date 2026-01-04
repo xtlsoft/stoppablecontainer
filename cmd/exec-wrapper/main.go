@@ -89,9 +89,7 @@ func main() {
 	}
 
 	// Setup bind mounts for special filesystems
-	if err := setupMounts(); err != nil {
-		fatal("Failed to setup mounts: %v", err)
-	}
+	setupMounts()
 
 	// Find the actual binary path in the rootfs
 	binaryPath := findBinary(command)
@@ -104,8 +102,9 @@ func main() {
 	chrootExec(binaryPath, args)
 }
 
-// setupMounts creates necessary bind mounts inside rootfs
-func setupMounts() error {
+// setupMounts creates necessary bind mounts inside rootfs.
+// Note: mount failures are non-fatal as mounts may already be done by DaemonSet.
+func setupMounts() {
 	mounts := []struct {
 		source string
 		target string
@@ -124,7 +123,7 @@ func setupMounts() error {
 	saPath := "/var/run/secrets/kubernetes.io/serviceaccount"
 	if _, err := os.Stat(saPath); err == nil {
 		targetPath := RootfsPath + saPath
-		os.MkdirAll(filepath.Dir(targetPath), 0755)
+		_ = os.MkdirAll(filepath.Dir(targetPath), 0755)
 		mounts = append(mounts, struct {
 			source string
 			target string
@@ -159,8 +158,6 @@ func setupMounts() error {
 			// Non-fatal, continue
 		}
 	}
-
-	return nil
 }
 
 // ensureTarget creates the mount target (file or directory as appropriate)
@@ -244,7 +241,7 @@ func chrootExec(binaryPath string, args []string) {
 	debug("Chrooting to %s and executing %s", RootfsPath, binaryPath)
 
 	// Set environment variable to prevent recursion
-	os.Setenv(EnvSCExecOriginal, "1")
+	_ = os.Setenv(EnvSCExecOriginal, "1")
 
 	// Get current working directory and try to preserve it
 	cwd, err := os.Getwd()

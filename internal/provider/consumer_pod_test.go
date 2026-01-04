@@ -24,6 +24,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+const (
+	testAppName = "my-app"
+)
+
 func TestNewConsumerPodBuilder(t *testing.T) {
 	sci := createTestSCI("test", "default", "busybox:latest")
 	builder := NewConsumerPodBuilder(sci, "node-1")
@@ -40,13 +44,13 @@ func TestNewConsumerPodBuilder(t *testing.T) {
 }
 
 func TestConsumerPodBuilder_Build(t *testing.T) {
-	sci := createTestSCI("my-app", "production", "nginx:latest")
+	sci := createTestSCI(testAppName, "production", "nginx:latest")
 	builder := NewConsumerPodBuilder(sci, "worker-node-1")
 	pod := builder.Build()
 
 	// Check pod name
-	if pod.Name != "my-app-consumer" {
-		t.Errorf("Pod name = %q, want %q", pod.Name, "my-app-consumer")
+	if pod.Name != testAppName+"-consumer" {
+		t.Errorf("Pod name = %q, want %q", pod.Name, testAppName+"-consumer")
 	}
 
 	// Check namespace
@@ -63,8 +67,8 @@ func TestConsumerPodBuilder_Build(t *testing.T) {
 	if pod.Labels[LabelManagedBy] != ManagedByValue {
 		t.Errorf("Label %s = %q, want %q", LabelManagedBy, pod.Labels[LabelManagedBy], ManagedByValue)
 	}
-	if pod.Labels[LabelInstance] != "my-app" {
-		t.Errorf("Label %s = %q, want %q", LabelInstance, pod.Labels[LabelInstance], "my-app")
+	if pod.Labels[LabelInstance] != testAppName {
+		t.Errorf("Label %s = %q, want %q", LabelInstance, pod.Labels[LabelInstance], testAppName)
 	}
 	if pod.Labels[LabelRole] != "consumer" {
 		t.Errorf("Label %s = %q, want %q", LabelRole, pod.Labels[LabelRole], "consumer")

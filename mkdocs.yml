@@ -89,6 +89,7 @@ nav:
   - User Guide:
       - Creating StoppableContainers: user-guide/creating.md
       - Managing Lifecycle: user-guide/lifecycle.md
+      - kubectl Plugin: user-guide/kubectl-plugin.md
       - Advanced Usage: user-guide/advanced.md
   - API Reference:
       - StoppableContainer: api-reference/stoppablecontainer.md

@@ -26,6 +26,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	testProviderAppName = "my-app"
+)
+
 func createTestSCI(name, namespace, image string) *scv1alpha1.StoppableContainerInstance {
 	return &scv1alpha1.StoppableContainerInstance{
 		ObjectMeta: metav1.ObjectMeta{
@@ -58,13 +62,13 @@ func TestNewProviderPodBuilder(t *testing.T) {
 }
 
 func TestProviderPodBuilder_Build(t *testing.T) {
-	sci := createTestSCI("my-app", "production", "nginx:latest")
+	sci := createTestSCI(testProviderAppName, "production", "nginx:latest")
 	builder := NewProviderPodBuilder(sci)
 	pod := builder.Build()
 
 	// Check pod name
-	if pod.Name != "my-app-provider" {
-		t.Errorf("Pod name = %q, want %q", pod.Name, "my-app-provider")
+	if pod.Name != testProviderAppName+"-provider" {
+		t.Errorf("Pod name = %q, want %q", pod.Name, testProviderAppName+"-provider")
 	}
 
 	// Check namespace
@@ -76,8 +80,8 @@ func TestProviderPodBuilder_Build(t *testing.T) {
 	if pod.Labels[LabelManagedBy] != ManagedByValue {
 		t.Errorf("Label %s = %q, want %q", LabelManagedBy, pod.Labels[LabelManagedBy], ManagedByValue)
 	}
-	if pod.Labels[LabelInstance] != "my-app" {
-		t.Errorf("Label %s = %q, want %q", LabelInstance, pod.Labels[LabelInstance], "my-app")
+	if pod.Labels[LabelInstance] != testProviderAppName {
+		t.Errorf("Label %s = %q, want %q", LabelInstance, pod.Labels[LabelInstance], testProviderAppName)
 	}
 	if pod.Labels[LabelRole] != "provider" {
 		t.Errorf("Label %s = %q, want %q", LabelRole, pod.Labels[LabelRole], "provider")
@@ -87,8 +91,8 @@ func TestProviderPodBuilder_Build(t *testing.T) {
 	if len(pod.OwnerReferences) != 1 {
 		t.Fatalf("Expected 1 owner reference, got %d", len(pod.OwnerReferences))
 	}
-	if pod.OwnerReferences[0].Name != "my-app" {
-		t.Errorf("OwnerReference name = %q, want %q", pod.OwnerReferences[0].Name, "my-app")
+	if pod.OwnerReferences[0].Name != testProviderAppName {
+		t.Errorf("OwnerReference name = %q, want %q", pod.OwnerReferences[0].Name, testProviderAppName)
 	}
 
 	// Check containers

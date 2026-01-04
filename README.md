@@ -193,6 +193,44 @@ kubectl exec <consumer-pod-name> -- /.sc-bin/sc-exec ls /
 # original filesystem, not the chroot. Use exec-wrapper for proper access.
 ```
 
+## kubectl Plugin
+
+StoppableContainer provides a kubectl plugin (`kubectl-sc`) for easier interaction, similar to kubevirt's `virtctl`:
+
+### Installation
+
+```bash
+# Download from releases
+curl -LO https://github.com/xtlsoft/stoppablecontainer/releases/latest/download/kubectl-sc-linux-amd64
+chmod +x kubectl-sc-linux-amd64
+sudo mv kubectl-sc-linux-amd64 /usr/local/bin/kubectl-sc
+
+# Or install with Go
+go install github.com/xtlsoft/stoppablecontainer/cmd/kubectl-sc@latest
+```
+
+### Quick Examples
+
+```bash
+# List all StoppableContainers
+kubectl sc list
+
+# Start/stop a container
+kubectl sc start my-container
+kubectl sc stop my-container --wait
+
+# Execute commands in the chroot
+kubectl sc exec my-container -- /bin/bash
+
+# View logs
+kubectl sc logs my-container -f
+
+# Create a new StoppableContainer
+kubectl sc create my-nginx --image nginx:latest --start
+```
+
+For full documentation, see the [kubectl Plugin Guide](https://xtlsoft.github.io/stoppablecontainer/user-guide/kubectl-plugin/).
+
 ### Delete
 
 ```bash
