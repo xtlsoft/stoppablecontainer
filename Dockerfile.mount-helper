@@ -1,5 +1,6 @@
 # Build the mount-helper binary
-FROM golang:1.23 AS builder
+# Use BUILDPLATFORM to ensure builder runs natively (not emulated)
+FROM --platform=${BUILDPLATFORM} golang:1.24 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -11,12 +12,12 @@ COPY go.sum go.sum
 # Copy just the mount-helper source (it only uses stdlib)
 COPY cmd/mount-helper/ cmd/mount-helper/
 
-# Build mount-helper - statically linked for Alpine
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -a \
-    -ldflags='-extldflags "-static"' \
+# Build mount-helper using Go cross-compilation (fast, no QEMU needed)
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a \
+    -ldflags='-extldflags "-static" -s -w' \
     -o mount-helper ./cmd/mount-helper/
 
-# Use distroless as minimal base image
+# Use distroless as minimal base image - this layer uses target platform
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
 COPY --from=builder /workspace/mount-helper .

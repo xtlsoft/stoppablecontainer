@@ -147,16 +147,29 @@ docker-push: ## Push docker image with the manager.
 # - have enabled BuildKit. More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 # - be able to push the image to your registry (i.e. if you do not set a valid value via IMG=<myregistry/image:<tag>> then the export will fail)
 # To adequately provide solutions that are compatible with multiple platforms, you should consider using this option.
-PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
+# Note: Dockerfiles already have --platform=${BUILDPLATFORM} for native Go cross-compilation (no QEMU needed for builder)
+PLATFORMS ?= linux/arm64,linux/amd64
+
 .PHONY: docker-buildx
 docker-buildx: ## Build and push docker image for the manager for cross-platform support
-	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
-	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
 	- $(CONTAINER_TOOL) buildx create --name stoppablecontainer-builder
 	$(CONTAINER_TOOL) buildx use stoppablecontainer-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} .
 	- $(CONTAINER_TOOL) buildx rm stoppablecontainer-builder
-	rm Dockerfile.cross
+
+.PHONY: docker-buildx-exec-wrapper
+docker-buildx-exec-wrapper: ## Build and push exec-wrapper image for cross-platform support
+	- $(CONTAINER_TOOL) buildx create --name stoppablecontainer-builder
+	$(CONTAINER_TOOL) buildx use stoppablecontainer-builder
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${EXEC_WRAPPER_IMG} -f Dockerfile.exec-wrapper .
+	- $(CONTAINER_TOOL) buildx rm stoppablecontainer-builder
+
+.PHONY: docker-buildx-mount-helper
+docker-buildx-mount-helper: ## Build and push mount-helper image for cross-platform support
+	- $(CONTAINER_TOOL) buildx create --name stoppablecontainer-builder
+	$(CONTAINER_TOOL) buildx use stoppablecontainer-builder
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${MOUNT_HELPER_IMG} -f Dockerfile.mount-helper .
+	- $(CONTAINER_TOOL) buildx rm stoppablecontainer-builder
 
 .PHONY: build-installer
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.

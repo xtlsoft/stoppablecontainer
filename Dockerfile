@@ -1,5 +1,6 @@
 # Build the manager binary
-FROM golang:1.24 AS builder
+# Use BUILDPLATFORM to ensure builder runs natively (not emulated)
+FROM --platform=${BUILDPLATFORM} golang:1.24 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -14,14 +15,15 @@ RUN go mod download
 # Copy the Go source (relies on .dockerignore to filter)
 COPY . .
 
-# Build manager binary
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main.go
+# Build manager binary using Go cross-compilation (fast, no QEMU needed)
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -ldflags="-s -w" -o manager cmd/main.go
 
-# Build exec-wrapper binary
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o sc-exec cmd/exec-wrapper/main.go
+# Build exec-wrapper binary using Go cross-compilation
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -ldflags="-s -w" -o sc-exec cmd/exec-wrapper/main.go
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
+# This layer uses target platform
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
 COPY --from=builder /workspace/manager .
