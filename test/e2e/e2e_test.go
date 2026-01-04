@@ -74,6 +74,17 @@ var _ = Describe("Manager", Ordered, func() {
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to install CRDs")
 
+		By("waiting for CRDs to be established")
+		verifyCRDsReady := func(g Gomega) {
+			cmd := exec.Command("kubectl", "wait", "--for=condition=Established",
+				"crd/stoppablecontainers.stoppablecontainer.xtlsoft.top",
+				"crd/stoppablecontainerinstances.stoppablecontainer.xtlsoft.top",
+				"--timeout=30s")
+			_, err := utils.Run(cmd)
+			g.Expect(err).NotTo(HaveOccurred(), "CRDs not established")
+		}
+		Eventually(verifyCRDsReady, time.Minute, time.Second).Should(Succeed())
+
 		By("deploying the mount-helper DaemonSet")
 		cmd = exec.Command("make", "deploy-daemonset", fmt.Sprintf("MOUNT_HELPER_IMG=%s", mountHelperImage))
 		_, err = utils.Run(cmd)
@@ -235,6 +246,11 @@ var _ = Describe("Manager", Ordered, func() {
 
 			// +kubebuilder:scaffold:e2e-metrics-webhooks-readiness
 
+			By("deleting any existing curl-metrics pod")
+			cmd = exec.Command("kubectl", "delete", "pod", "curl-metrics",
+				"-n", namespace, "--ignore-not-found", "--timeout=30s")
+			_, _ = utils.Run(cmd) // Ignore errors if pod doesn't exist
+
 			By("creating the curl-metrics pod to access the metrics endpoint")
 			cmd = exec.Command("kubectl", "run", "curl-metrics", "--restart=Never",
 				"--namespace", namespace,
@@ -372,7 +388,11 @@ spec:
 			verifyConsumerDeleted := func(g Gomega) {
 				cmd := exec.Command("kubectl", "get", "pod", fmt.Sprintf("%s-consumer", scName),
 					"-n", testNamespace, "-o", "jsonpath={.metadata.name}")
-				output, _ := utils.Run(cmd)
+				output, err := utils.Run(cmd)
+				// Pod is deleted when we get NotFound error or empty output
+				if err != nil && strings.Contains(output, "NotFound") {
+					return // Pod is deleted, success
+				}
 				g.Expect(output).To(BeEmpty(), "Consumer pod should be deleted")
 			}
 			Eventually(verifyConsumerDeleted, 2*time.Minute, time.Second).Should(Succeed())
