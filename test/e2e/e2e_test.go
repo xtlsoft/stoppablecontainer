@@ -63,11 +63,11 @@ var _ = Describe("Manager", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred(), "Failed to create namespace")
 		}
 
-		By("labeling the namespace to enforce the restricted security policy")
+		By("labeling the namespace to allow privileged workloads (mount-helper requires hostPID, privileged mode)")
 		cmd = exec.Command("kubectl", "label", "--overwrite", "ns", namespace,
-			"pod-security.kubernetes.io/enforce=restricted")
+			"pod-security.kubernetes.io/enforce=privileged")
 		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to label namespace with restricted policy")
+		Expect(err).NotTo(HaveOccurred(), "Failed to label namespace with privileged policy")
 
 		By("installing CRDs")
 		cmd = exec.Command("make", "install")
