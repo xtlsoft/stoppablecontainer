@@ -94,6 +94,18 @@ var _ = Describe("Manager", Ordered, func() {
 		cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", projectImage))
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
+
+		// Set the exec-wrapper image environment variable for E2E tests
+		// This overrides the default image with the locally built one
+		execWrapperImg := os.Getenv("EXEC_WRAPPER_IMAGE")
+		if execWrapperImg == "" {
+			execWrapperImg = "stoppablecontainer-exec-wrapper:e2e-test"
+		}
+		By(fmt.Sprintf("setting exec-wrapper image to %s", execWrapperImg))
+		cmd = exec.Command("kubectl", "set", "env", "deployment/stoppablecontainer-controller-manager",
+			"-n", namespace, fmt.Sprintf("STOPPABLECONTAINER_EXEC_WRAPPER_IMAGE=%s", execWrapperImg))
+		_, err = utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to set exec-wrapper image environment variable")
 	})
 
 	// After all tests have been executed, clean up by undeploying the controller, uninstalling CRDs,

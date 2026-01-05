@@ -37,6 +37,7 @@ var (
 	// - DOCKER_BUILD_SKIP=true: Skips Docker image build and Kind loading during test setup.
 	// - PROJECT_IMAGE=<image>: Override the default project image.
 	// - MOUNT_HELPER_IMAGE=<image>: Override the default mount-helper image.
+	// - EXEC_WRAPPER_IMAGE=<image>: Override the default exec-wrapper image.
 	// These variables are useful if CertManager is already installed or image is pre-built,
 	// avoiding re-installation and conflicts.
 	skipCertManagerInstall = os.Getenv("CERT_MANAGER_INSTALL_SKIP") == "true"
@@ -50,6 +51,9 @@ var (
 
 	// mountHelperImage is the name of the mount-helper DaemonSet image
 	mountHelperImage = getEnvOrDefault("MOUNT_HELPER_IMAGE", "stoppablecontainer-mount-helper:e2e-test")
+
+	// execWrapperImage is the name of the exec-wrapper image (used for pause binary and consumer chroot)
+	execWrapperImage = getEnvOrDefault("EXEC_WRAPPER_IMAGE", "stoppablecontainer-exec-wrapper:e2e-test")
 )
 
 func getEnvOrDefault(key, defaultVal string) string {
@@ -81,6 +85,11 @@ var _ = BeforeSuite(func() {
 		_, err = utils.Run(cmd)
 		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the mount-helper image")
 
+		By("building the exec-wrapper image")
+		cmd = exec.Command("make", "docker-build-exec-wrapper", fmt.Sprintf("EXEC_WRAPPER_IMG=%s", execWrapperImage))
+		_, err = utils.Run(cmd)
+		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the exec-wrapper image")
+
 		// TODO(user): If you want to change the e2e test vendor from Kind, ensure the image is
 		// built and available before running the tests. Also, remove the following block.
 		By("loading the manager(Operator) image on Kind")
@@ -90,8 +99,35 @@ var _ = BeforeSuite(func() {
 		By("loading the mount-helper image on Kind")
 		err = utils.LoadImageToKindClusterWithName(mountHelperImage)
 		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the mount-helper image into Kind")
+
+		By("loading the exec-wrapper image on Kind")
+		err = utils.LoadImageToKindClusterWithName(execWrapperImage)
+		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the exec-wrapper image into Kind")
 	} else {
 		_, _ = fmt.Fprintf(GinkgoWriter, "Skipping Docker build (DOCKER_BUILD_SKIP=true)\n")
+	}
+
+	// Pre-pull and load required images for provider/consumer pods
+	// These images are needed by provider pods and may not be available in Kind by default
+	requiredImages := []string{
+		"alpine:latest",  // Provider container
+		"busybox:stable", // Test user image (rootfs container)
+	}
+
+	for _, img := range requiredImages {
+		By(fmt.Sprintf("pulling image %s", img))
+		cmd := exec.Command("docker", "pull", img)
+		_, err := utils.Run(cmd)
+		if err != nil {
+			_, _ = fmt.Fprintf(GinkgoWriter, "Warning: failed to pull %s: %v\n", img, err)
+			continue
+		}
+
+		By(fmt.Sprintf("loading image %s on Kind", img))
+		err = utils.LoadImageToKindClusterWithName(img)
+		if err != nil {
+			_, _ = fmt.Fprintf(GinkgoWriter, "Warning: failed to load %s to Kind: %v\n", img, err)
+		}
 	}
 
 	// The tests-e2e are intended to run on a temporary cluster that is created and destroyed for testing.

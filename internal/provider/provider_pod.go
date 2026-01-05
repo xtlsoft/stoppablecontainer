@@ -52,6 +52,7 @@ package provider
 
 import (
 	"fmt"
+	"os"
 
 	scv1alpha1 "github.com/xtlsoft/stoppablecontainer/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -99,13 +100,20 @@ const (
 	PodUIDEnv = "POD_UID"
 )
 
-// Default images used by the operator
-const (
+// Default images used by the operator (can be overridden via environment variables)
+var (
 	// ProviderImage is the image used for the provider container (needs nsenter)
-	ProviderImage = "alpine:latest"
+	ProviderImage = getEnvOrDefault("STOPPABLECONTAINER_PROVIDER_IMAGE", "alpine:latest")
 	// ExecWrapperImage is the image containing the exec-wrapper binary
-	ExecWrapperImage = "crmirror.lcpu.dev/xtlsoft/stoppablecontainer-exec:latest"
+	ExecWrapperImage = getEnvOrDefault("STOPPABLECONTAINER_EXEC_WRAPPER_IMAGE", "crmirror.lcpu.dev/xtlsoft/stoppablecontainer-exec:latest")
 )
+
+func getEnvOrDefault(key, defaultVal string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return defaultVal
+}
 
 // Labels and annotations used by the operator
 const (
