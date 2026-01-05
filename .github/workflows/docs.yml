@@ -56,7 +56,17 @@ jobs:
           helm package charts/stoppablecontainer -d site/charts
           
           # Try to download existing index.yaml from gh-pages
-          curl -sSL https://xtlsoft.github.io/stoppablecontainer/charts/index.yaml -o site/charts/old-index.yaml 2>/dev/null || true
+          # Only keep it if it's a valid YAML file (starts with apiVersion)
+          if curl -sSL https://xtlsoft.github.io/stoppablecontainer/charts/index.yaml -o site/charts/old-index.yaml 2>/dev/null; then
+            if head -1 site/charts/old-index.yaml | grep -q "^apiVersion:"; then
+              echo "Found valid existing index.yaml, will merge"
+            else
+              echo "Downloaded file is not a valid Helm index, ignoring"
+              rm -f site/charts/old-index.yaml
+            fi
+          else
+            rm -f site/charts/old-index.yaml
+          fi
           
           # Generate or merge index
           if [ -f site/charts/old-index.yaml ]; then
