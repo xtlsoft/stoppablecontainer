@@ -46,7 +46,11 @@ const (
 	// RootfsMarkerEnv is the environment variable that identifies rootfs containers
 	RootfsMarkerEnv = "ROOTFS_MARKER=true"
 	// PollInterval is how often to scan for new requests
-	PollInterval = 2 * time.Second
+	PollInterval = 500 * time.Millisecond
+	// MaxRetries is the maximum number of retries for finding rootfs container
+	MaxRetries = 30
+	// RetryInterval is the interval between retries
+	RetryInterval = 200 * time.Millisecond
 )
 
 // MountRequest represents a request from a provider pod to set up mounts
@@ -159,10 +163,26 @@ func processRequest(workDir, requestFile string) error {
 
 	log.Info("processing request", "podUID", request.PodUID)
 
-	// Find the rootfs container PID
-	rootfsPID, err := findRootfsContainer(request.PodUID)
-	if err != nil {
-		return fmt.Errorf("failed to find rootfs container: %w", err)
+	// Find the rootfs container PID with retries
+	// This handles the race condition where the request is written before
+	// the rootfs container is fully registered in /proc
+	var rootfsPID int
+	var findErr error
+	for i := 0; i < MaxRetries; i++ {
+		rootfsPID, findErr = findRootfsContainer(request.PodUID)
+		if findErr == nil {
+			break
+		}
+		if i < MaxRetries-1 {
+			// Only log after several attempts to reduce noise
+			if i >= 5 && i%5 == 0 {
+				log.Info("waiting for rootfs container", "attempt", i+1, "podUID", request.PodUID)
+			}
+			time.Sleep(RetryInterval)
+		}
+	}
+	if findErr != nil {
+		return fmt.Errorf("failed to find rootfs container after %d retries: %w", MaxRetries, findErr)
 	}
 
 	log.Info("found rootfs container", "pid", rootfsPID)

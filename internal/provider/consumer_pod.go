@@ -193,15 +193,23 @@ WORKDIR="%s"
 echo "[consumer] Starting consumer container..."
 
 # Wait for rootfs to be available (mounted by DaemonSet)
-for i in $(seq 1 120); do
+# Use a fast polling loop initially, then slow down
+attempt=0
+while [ $attempt -lt 120 ]; do
     if [ -d "$ROOTFS/bin" ] || [ -d "$ROOTFS/usr/bin" ]; then
         # Also check that proc is mounted (indicates DaemonSet has completed setup)
         if mountpoint -q "$ROOTFS/proc" 2>/dev/null; then
             break
         fi
     fi
-    echo "[consumer] Waiting for DaemonSet to complete rootfs setup... ($i/120)"
-    sleep 1
+    attempt=$((attempt + 1))
+    if [ $attempt -le 10 ]; then
+        # Fast polling for first 2 seconds
+        sleep 0.2
+    else
+        echo "[consumer] Waiting for DaemonSet to complete rootfs setup... ($attempt/120)"
+        sleep 1
+    fi
 done
 
 if [ ! -d "$ROOTFS/bin" ] && [ ! -d "$ROOTFS/usr/bin" ]; then
@@ -228,12 +236,26 @@ fi
 
 # Mount service account secrets if available
 # This needs to be done by consumer as it has access to its own secrets
+# Note: Some images use /run instead of /var/run (with /var/run being a symlink)
 SA_PATH="/var/run/secrets/kubernetes.io/serviceaccount"
 if [ -d "$SA_PATH" ]; then
-    mkdir -p "$ROOTFS$SA_PATH"
+    # Determine the actual path to use in rootfs
+    # If /var/run is a symlink to /run, use /run directly
+    if [ -L "$ROOTFS/var/run" ]; then
+        ROOTFS_SA_PATH="$ROOTFS/run/secrets/kubernetes.io/serviceaccount"
+    else
+        ROOTFS_SA_PATH="$ROOTFS$SA_PATH"
+    fi
+    
+    # Create parent directories
+    mkdir -p "$(dirname "$ROOTFS_SA_PATH")" 2>/dev/null || true
+    mkdir -p "$ROOTFS_SA_PATH" 2>/dev/null || true
+    
     # Try mount --bind first, fallback to cp if not available
-    mount --bind "$SA_PATH" "$ROOTFS$SA_PATH" 2>/dev/null || \
-        cp -r "$SA_PATH"/* "$ROOTFS$SA_PATH/" 2>/dev/null || true
+    if [ -d "$ROOTFS_SA_PATH" ]; then
+        mount --bind "$SA_PATH" "$ROOTFS_SA_PATH" 2>/dev/null || \
+            cp -r "$SA_PATH"/* "$ROOTFS_SA_PATH/" 2>/dev/null || true
+    fi
 fi
 
 echo "[consumer] Setup complete, chrooting..."

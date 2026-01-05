@@ -148,9 +148,26 @@ func (b *ProviderPodBuilder) Build() *corev1.Pod {
 	hostPathType := corev1.HostPathDirectoryOrCreate
 
 	// providerScript writes a mount request for the DaemonSet and waits for completion
+	// It uses fast polling initially to minimize startup latency
 	providerScript := `
 set -e
-echo "[provider] Starting, writing mount request..."
+echo "[provider] Starting..."
+
+# Wait briefly for the rootfs container to be fully started
+# The rootfs container runs in the same pod, so we can check if its process is running
+# by looking for the sc-pause process in our shared process namespace
+echo "[provider] Waiting for rootfs container to initialize..."
+attempt=0
+while [ $attempt -lt 50 ]; do
+    # Check if pause process from rootfs container is running
+    if pgrep -f "sc-pause" >/dev/null 2>&1; then
+        break
+    fi
+    attempt=$((attempt + 1))
+    sleep 0.1
+done
+
+echo "[provider] Writing mount request..."
 
 # Write mount request for DaemonSet
 cat > /propagated/request.json <<EOF
@@ -159,14 +176,21 @@ EOF
 
 echo "[provider] Request written, waiting for DaemonSet to complete mount..."
 
-# Wait for ready signal from DaemonSet
-for i in $(seq 1 120); do
+# Wait for ready signal from DaemonSet with fast initial polling
+attempt=0
+while [ $attempt -lt 300 ]; do
     if [ -f "/propagated/ready.json" ]; then
         echo "[provider] Mount completed by DaemonSet"
         cat /propagated/ready.json
         break
     fi
-    sleep 1
+    attempt=$((attempt + 1))
+    if [ $attempt -le 20 ]; then
+        # Fast polling for first 2 seconds (20 * 0.1s)
+        sleep 0.1
+    else
+        sleep 0.5
+    fi
 done
 
 if [ ! -f "/propagated/ready.json" ]; then
