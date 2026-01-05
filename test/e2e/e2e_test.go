@@ -155,7 +155,7 @@ var _ = Describe("Manager", Ordered, func() {
 			}
 
 			By("Fetching mount-helper DaemonSet pod logs")
-			cmd = exec.Command("kubectl", "logs", "-l", "app.kubernetes.io/name=stoppablecontainer-mount-helper",
+			cmd = exec.Command("kubectl", "logs", "-l", "app.kubernetes.io/component=mount-helper",
 				"-n", namespace, "--tail=100")
 			mountHelperLogs, err := utils.Run(cmd)
 			if err == nil {
