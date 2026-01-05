@@ -445,6 +445,28 @@ spec:
 			}
 			Eventually(verifyConsumerOutput, time.Minute, time.Second).Should(Succeed())
 
+			By("testing kubectl exec works directly in chroot environment")
+			verifyKubectlExec := func(g Gomega) {
+				// Test that kubectl exec runs commands in the chrooted rootfs
+				// Using 'uname -a' which is available in busybox
+				cmd := exec.Command("kubectl", "exec", scName,
+					"-n", testNamespace, "--", "uname", "-a")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred(), "kubectl exec should work")
+				g.Expect(output).To(ContainSubstring("Linux"), "Should run in Linux rootfs")
+			}
+			Eventually(verifyKubectlExec, 30*time.Second, time.Second).Should(Succeed())
+
+			By("testing kubectl exec with sh command")
+			verifySh := func(g Gomega) {
+				cmd := exec.Command("kubectl", "exec", scName,
+					"-n", testNamespace, "--", "sh", "-c", "echo HELLO_FROM_ROOTFS")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred(), "kubectl exec with sh should work")
+				g.Expect(output).To(ContainSubstring("HELLO_FROM_ROOTFS"), "sh should echo the string")
+			}
+			Eventually(verifySh, 30*time.Second, time.Second).Should(Succeed())
+
 			By("stopping the StoppableContainer")
 			cmd = exec.Command("kubectl", "patch", "stoppablecontainer", scName,
 				"-n", testNamespace, "--type=merge", "-p", `{"spec":{"running":false}}`)
@@ -479,6 +501,36 @@ spec:
 
 			By("waiting for consumer pod to be recreated")
 			Eventually(verifyConsumerPod, 2*time.Minute, time.Second).Should(Succeed())
+
+			By("verifying kubectl exec still works after restart")
+			verifyExecAfterRestart := func(g Gomega) {
+				cmd := exec.Command("kubectl", "exec", scName,
+					"-n", testNamespace, "--", "sh", "-c", "echo RESTART_OK")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred(), "kubectl exec should work after restart")
+				g.Expect(output).To(ContainSubstring("RESTART_OK"), "sh should echo after restart")
+			}
+			Eventually(verifyExecAfterRestart, 30*time.Second, time.Second).Should(Succeed())
+
+			By("verifying rootfs is preserved after restart (state persists)")
+			// Create a file and verify it persists
+			createFile := func(g Gomega) {
+				cmd := exec.Command("kubectl", "exec", scName,
+					"-n", testNamespace, "--", "sh", "-c", "echo 'persistence_test' > /tmp/e2e_test_file")
+				_, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred(), "should create file in rootfs")
+			}
+			Eventually(createFile, 30*time.Second, time.Second).Should(Succeed())
+
+			// Verify file exists
+			verifyFile := func(g Gomega) {
+				cmd := exec.Command("kubectl", "exec", scName,
+					"-n", testNamespace, "--", "cat", "/tmp/e2e_test_file")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred(), "should read file from rootfs")
+				g.Expect(output).To(ContainSubstring("persistence_test"))
+			}
+			Eventually(verifyFile, 30*time.Second, time.Second).Should(Succeed())
 
 			By("cleaning up the StoppableContainer")
 			cmd = exec.Command("kubectl", "delete", "stoppablecontainer", scName, "-n", testNamespace)

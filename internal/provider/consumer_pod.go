@@ -134,7 +134,10 @@ func (b *ConsumerPodBuilder) Build() *corev1.Pod {
 					ReadinessProbe: &corev1.Probe{
 						ProbeHandler: corev1.ProbeHandler{
 							Exec: &corev1.ExecAction{
-								Command: []string{"test", "-d", RootfsMountPath + "/bin"},
+								// Use /bin/busybox directly to avoid sc-exec interception
+								// sc-exec would chroot and then the /rootfs path wouldn't exist
+								// Use -e (exists) instead of -d because /bin may be a symlink (e.g., on Ubuntu)
+								Command: []string{"/bin/busybox", "test", "-e", RootfsMountPath + "/bin"},
 							},
 						},
 						InitialDelaySeconds: 1,
