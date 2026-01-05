@@ -136,13 +136,68 @@ var _ = Describe("Manager", Ordered, func() {
 				_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get Controller logs: %s", err)
 			}
 
-			By("Fetching Kubernetes events")
+			By("Fetching Kubernetes events in system namespace")
 			cmd = exec.Command("kubectl", "get", "events", "-n", namespace, "--sort-by=.lastTimestamp")
 			eventsOutput, err := utils.Run(cmd)
 			if err == nil {
-				_, _ = fmt.Fprintf(GinkgoWriter, "Kubernetes events:\n%s", eventsOutput)
+				_, _ = fmt.Fprintf(GinkgoWriter, "Kubernetes events (system namespace):\n%s", eventsOutput)
 			} else {
 				_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get Kubernetes events: %s", err)
+			}
+
+			By("Fetching Kubernetes events in default namespace")
+			cmd = exec.Command("kubectl", "get", "events", "-n", "default", "--sort-by=.lastTimestamp")
+			eventsOutput, err = utils.Run(cmd)
+			if err == nil {
+				_, _ = fmt.Fprintf(GinkgoWriter, "Kubernetes events (default namespace):\n%s", eventsOutput)
+			} else {
+				_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get Kubernetes events (default): %s", err)
+			}
+
+			By("Fetching mount-helper DaemonSet pod logs")
+			cmd = exec.Command("kubectl", "logs", "-l", "app.kubernetes.io/name=stoppablecontainer-mount-helper",
+				"-n", namespace, "--tail=100")
+			mountHelperLogs, err := utils.Run(cmd)
+			if err == nil {
+				_, _ = fmt.Fprintf(GinkgoWriter, "Mount-helper logs:\n%s", mountHelperLogs)
+			} else {
+				_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get mount-helper logs: %s", err)
+			}
+
+			By("Fetching provider pod logs")
+			cmd = exec.Command("kubectl", "logs", "e2e-test-sc-provider", "-n", "default", "-c", "provider", "--tail=100")
+			providerLogs, err := utils.Run(cmd)
+			if err == nil {
+				_, _ = fmt.Fprintf(GinkgoWriter, "Provider container logs:\n%s", providerLogs)
+			} else {
+				_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get provider logs: %s", err)
+			}
+
+			By("Fetching provider pod description")
+			cmd = exec.Command("kubectl", "describe", "pod", "e2e-test-sc-provider", "-n", "default")
+			providerDesc, err := utils.Run(cmd)
+			if err == nil {
+				_, _ = fmt.Fprintf(GinkgoWriter, "Provider pod description:\n%s", providerDesc)
+			} else {
+				_, _ = fmt.Fprintf(GinkgoWriter, "Failed to describe provider pod: %s", err)
+			}
+
+			By("Fetching StoppableContainer details")
+			cmd = exec.Command("kubectl", "get", "stoppablecontainer", "e2e-test-sc", "-n", "default", "-o", "yaml")
+			scDetails, err := utils.Run(cmd)
+			if err == nil {
+				_, _ = fmt.Fprintf(GinkgoWriter, "StoppableContainer:\n%s", scDetails)
+			} else {
+				_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get StoppableContainer: %s", err)
+			}
+
+			By("Fetching StoppableContainerInstance details")
+			cmd = exec.Command("kubectl", "get", "stoppablecontainerinstance", "e2e-test-sc", "-n", "default", "-o", "yaml")
+			sciDetails, err := utils.Run(cmd)
+			if err == nil {
+				_, _ = fmt.Fprintf(GinkgoWriter, "StoppableContainerInstance:\n%s", sciDetails)
+			} else {
+				_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get StoppableContainerInstance: %s", err)
 			}
 
 			By("Fetching curl-metrics logs")
