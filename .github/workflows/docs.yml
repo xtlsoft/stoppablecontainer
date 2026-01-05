@@ -1,4 +1,4 @@
-name: Deploy Documentation
+name: Deploy Documentation and Helm Repository
 
 on:
   push:
@@ -6,8 +6,11 @@ on:
       - 'docs-site/**'
       - 'docs/**'
       - 'mkdocs.yml'
+      - 'charts/**'
     branches:
       - main
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
@@ -34,6 +37,9 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -41,6 +47,24 @@ jobs:
 
       - name: Build documentation
         run: mkdocs build
+
+      - name: Package Helm chart and create repository index
+        run: |
+          mkdir -p site/charts
+          
+          # Package current chart
+          helm package charts/stoppablecontainer -d site/charts
+          
+          # Try to download existing index.yaml from gh-pages
+          curl -sSL https://xtlsoft.github.io/stoppablecontainer/charts/index.yaml -o site/charts/old-index.yaml 2>/dev/null || true
+          
+          # Generate or merge index
+          if [ -f site/charts/old-index.yaml ]; then
+            helm repo index site/charts --url https://xtlsoft.github.io/stoppablecontainer/charts --merge site/charts/old-index.yaml
+            rm site/charts/old-index.yaml
+          else
+            helm repo index site/charts --url https://xtlsoft.github.io/stoppablecontainer/charts
+          fi
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

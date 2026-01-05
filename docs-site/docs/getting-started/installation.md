@@ -33,7 +33,7 @@ kubectl wait --for=condition=available --timeout=300s deployment/cert-manager-ca
 
 ```bash
 # Add the Helm repository
-helm repo add stoppablecontainer https://xtlsoft.github.io/stoppablecontainer
+helm repo add stoppablecontainer https://xtlsoft.github.io/stoppablecontainer/charts
 helm repo update
 
 # Install StoppableContainer
@@ -47,7 +47,30 @@ This installs:
 - The mount-helper DaemonSet (runs on all nodes)
 - Required CRDs and RBAC
 
-### Option 2: Building from Source
+### Option 2: Using YAML Manifest
+
+For a simple installation without Helm, you can use the pre-built manifest file:
+
+```bash
+# Install all components with a single command
+kubectl apply -f https://github.com/xtlsoft/stoppablecontainer/releases/latest/download/install.yaml
+```
+
+This manifest includes:
+
+- Custom Resource Definitions (CRDs)
+- Controller Deployment
+- Mount-helper DaemonSet
+- RBAC configuration (ServiceAccount, Role, RoleBinding)
+- Webhook configuration
+
+To install a specific version:
+
+```bash
+kubectl apply -f https://github.com/xtlsoft/stoppablecontainer/releases/download/v0.1.2/install.yaml
+```
+
+### Option 3: Building from Source
 
 Clone the repository and deploy:
 
@@ -130,6 +153,19 @@ kubectl delete stoppablecontainers --all -A
 
 # Uninstall Helm release
 helm uninstall stoppablecontainer -n stoppablecontainer-system
+```
+
+### If installed with YAML manifest:
+
+```bash
+# Remove all StoppableContainer resources first
+kubectl delete stoppablecontainers --all -A
+
+# Wait for cleanup
+kubectl wait --for=delete stoppablecontainerinstances --all -A --timeout=120s
+
+# Delete the manifest
+kubectl delete -f https://github.com/xtlsoft/stoppablecontainer/releases/latest/download/install.yaml
 ```
 
 ### If installed from source:
