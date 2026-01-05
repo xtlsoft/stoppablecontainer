@@ -68,7 +68,7 @@ spec:
         ports: []
         env:
         - name: STOPPABLECONTAINER_EXEC_WRAPPER_IMAGE
-          value: "crmirror.lcpu.dev/xtlsoft/stoppablecontainer-exec:latest"
+          value: "ghcr.io/xtlsoft/stoppablecontainer-exec:latest"
         securityContext:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false

@@ -105,7 +105,7 @@ var (
 	// ProviderImage is the image used for the provider container (needs nsenter)
 	ProviderImage = getEnvOrDefault("STOPPABLECONTAINER_PROVIDER_IMAGE", "alpine:latest")
 	// ExecWrapperImage is the image containing the exec-wrapper binary
-	ExecWrapperImage = getEnvOrDefault("STOPPABLECONTAINER_EXEC_WRAPPER_IMAGE", "crmirror.lcpu.dev/xtlsoft/stoppablecontainer-exec:latest")
+	ExecWrapperImage = getEnvOrDefault("STOPPABLECONTAINER_EXEC_WRAPPER_IMAGE", "ghcr.io/xtlsoft/stoppablecontainer-exec:latest")
 )
 
 func getEnvOrDefault(key, defaultVal string) string {
