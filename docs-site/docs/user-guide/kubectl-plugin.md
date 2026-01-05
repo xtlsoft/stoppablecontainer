@@ -240,9 +240,9 @@ kubectl sc delete my-app
 | Create | Apply YAML manifest | `kubectl sc create NAME --image=IMAGE` |
 | Start | Patch spec.running=true | `kubectl sc start NAME` |
 | Stop | Patch spec.running=false | `kubectl sc stop NAME` |
-| Exec | `kubectl exec NAME-consumer -- /.sc-bin/sc-exec CMD` | `kubectl sc exec NAME -- CMD` |
-| Logs | `kubectl logs NAME-consumer` | `kubectl sc logs NAME` |
+| Exec | `kubectl exec NAME -- CMD` | `kubectl sc exec NAME -- CMD` |
+| Logs | `kubectl logs NAME` | `kubectl sc logs NAME` |
 | Delete | `kubectl delete stoppablecontainer NAME` | `kubectl sc delete NAME` |
 
-!!! note "Exec requires sc-exec wrapper"
-    When using raw `kubectl exec`, you must use the `/.sc-bin/sc-exec` wrapper to run commands in the persistent rootfs. The `kubectl sc exec` command handles this automatically.
+!!! note "Direct kubectl exec now works"
+    You can now use regular `kubectl exec NAME -- CMD` to execute commands inside the container. The command automatically runs inside the chroot environment with the user's rootfs. The consumer pod uses the same name as the StoppableContainerInstance (no `-consumer` suffix).

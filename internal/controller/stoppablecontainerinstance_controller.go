@@ -102,7 +102,7 @@ func (r *StoppableContainerInstanceReconciler) Reconcile(ctx context.Context, re
 	consumerPod := &corev1.Pod{}
 	consumerPodName := types.NamespacedName{
 		Namespace: sci.Namespace,
-		Name:      fmt.Sprintf("%s-consumer", sci.Name),
+		Name:      sci.Name, // Consumer pod uses same name as SCI for seamless experience
 	}
 	consumerExists := true
 	if err := r.Get(ctx, consumerPodName, consumerPod); err != nil {
@@ -184,7 +184,7 @@ func (r *StoppableContainerInstanceReconciler) handleDeletion(ctx context.Contex
 	consumerPod := &corev1.Pod{}
 	consumerPodName := types.NamespacedName{
 		Namespace: sci.Namespace,
-		Name:      fmt.Sprintf("%s-consumer", sci.Name),
+		Name:      sci.Name, // Consumer pod uses same name as SCI
 	}
 	if err := r.Get(ctx, consumerPodName, consumerPod); err == nil {
 		if err := r.Delete(ctx, consumerPod); err != nil && !errors.IsNotFound(err) {

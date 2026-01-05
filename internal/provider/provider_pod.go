@@ -78,6 +78,8 @@ const (
 	PropagatedVolumeName = "sc-propagated"
 	// ExecWrapperVolumeName is the volume name for the exec-wrapper binary
 	ExecWrapperVolumeName = "sc-exec-wrapper"
+	// BinOverlayVolumeName is the volume name for /bin overlay to intercept commands
+	BinOverlayVolumeName = "sc-bin-overlay"
 	// PauseVolumeName is the volume name for the pause binary injection
 	PauseVolumeName = "sc-pause-bin"
 	// PropagatedMountPath is where the hostPath is mounted in the provider pod
@@ -102,10 +104,10 @@ const (
 
 // Default images used by the operator (can be overridden via environment variables)
 var (
-	// ProviderImage is the image used for the provider container (needs nsenter)
-	ProviderImage = getEnvOrDefault("STOPPABLECONTAINER_PROVIDER_IMAGE", "alpine:latest")
-	// ExecWrapperImage is the image containing the exec-wrapper binary
+	// ExecWrapperImage is the image containing the exec-wrapper, pause, and provider binaries
 	ExecWrapperImage = getEnvOrDefault("STOPPABLECONTAINER_EXEC_WRAPPER_IMAGE", "ghcr.io/xtlsoft/stoppablecontainer-exec:latest")
+	// ExecWrapperPullPolicy is the image pull policy for the exec-wrapper image
+	ExecWrapperPullPolicy = corev1.PullPolicy(getEnvOrDefault("STOPPABLECONTAINER_EXEC_WRAPPER_PULL_POLICY", string(corev1.PullIfNotPresent)))
 )
 
 func getEnvOrDefault(key, defaultVal string) string {
@@ -141,76 +143,11 @@ func NewProviderPodBuilder(sci *scv1alpha1.StoppableContainerInstance) *Provider
 // Build creates the provider Pod specification.
 // The provider pod uses a DaemonSet-based architecture where:
 // - The rootfs container runs the user's image and marks itself with ROOTFS_MARKER
-// - The provider container writes a request.json to hostPath and waits for ready.json
+// - The provider container runs the sc-provider binary that coordinates with the DaemonSet
 // - The mount-helper DaemonSet handles all privileged mount operations
 func (b *ProviderPodBuilder) Build() *corev1.Pod {
 	hostPath := GetHostPath(b.sci)
 	hostPathType := corev1.HostPathDirectoryOrCreate
-
-	// providerScript writes a mount request for the DaemonSet and waits for completion
-	// It uses fast polling initially to minimize startup latency
-	providerScript := `
-set -e
-echo "[provider] Starting..."
-
-# Wait briefly for the rootfs container to be fully started
-# The rootfs container runs in the same pod, so we can check if its process is running
-# by looking for the sc-pause process in our shared process namespace
-echo "[provider] Waiting for rootfs container to initialize..."
-attempt=0
-while [ $attempt -lt 50 ]; do
-    # Check if pause process from rootfs container is running
-    if pgrep -f "sc-pause" >/dev/null 2>&1; then
-        break
-    fi
-    attempt=$((attempt + 1))
-    sleep 0.1
-done
-
-echo "[provider] Writing mount request..."
-
-# Write mount request for DaemonSet
-cat > /propagated/request.json <<EOF
-{"pod_uid":"$POD_UID","namespace":"$POD_NAMESPACE","name":"$POD_NAME"}
-EOF
-
-echo "[provider] Request written, waiting for DaemonSet to complete mount..."
-
-# Wait for ready signal from DaemonSet with fast initial polling
-attempt=0
-while [ $attempt -lt 300 ]; do
-    if [ -f "/propagated/ready.json" ]; then
-        echo "[provider] Mount completed by DaemonSet"
-        cat /propagated/ready.json
-        break
-    fi
-    attempt=$((attempt + 1))
-    if [ $attempt -le 20 ]; then
-        # Fast polling for first 2 seconds (20 * 0.1s)
-        sleep 0.1
-    else
-        sleep 0.5
-    fi
-done
-
-if [ ! -f "/propagated/ready.json" ]; then
-    echo "[provider] ERROR: Timeout waiting for DaemonSet mount"
-    exit 1
-fi
-
-# Verify the mount
-if [ -d "/propagated/rootfs/bin" ] || [ -d "/propagated/rootfs/usr" ] || [ -f "/propagated/rootfs/etc/passwd" ]; then
-    echo "[provider] Rootfs mounted successfully at /propagated/rootfs"
-    ls /propagated/rootfs | head -10
-else
-    echo "[provider] WARNING: Rootfs mount may be incomplete"
-    ls /propagated/rootfs 2>&1
-fi
-
-touch /propagated/ready
-echo "[provider] Provider ready, sleeping..."
-exec sleep infinity
-`
 
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -239,9 +176,11 @@ exec sleep infinity
 			Tolerations:           b.sci.Spec.Provider.Tolerations,
 			Containers: []corev1.Container{
 				{
-					Name:    ProviderContainerName,
-					Image:   ProviderImage,
-					Command: []string{"/bin/sh", "-c", providerScript},
+					Name:            ProviderContainerName,
+					Image:           ExecWrapperImage,
+					ImagePullPolicy: ExecWrapperPullPolicy,
+					// Use the sc-provider binary instead of shell script
+					Command: []string{"/sc-provider"},
 					Env: []corev1.EnvVar{
 						{
 							Name: PodUIDEnv,
@@ -280,7 +219,7 @@ exec sleep infinity
 					ReadinessProbe: &corev1.Probe{
 						ProbeHandler: corev1.ProbeHandler{
 							Exec: &corev1.ExecAction{
-								Command: []string{"cat", "/propagated/ready"},
+								Command: []string{"test", "-f", "/propagated/ready"},
 							},
 						},
 						InitialDelaySeconds: 1,
@@ -303,9 +242,10 @@ exec sleep infinity
 			InitContainers: []corev1.Container{
 				// Pause init container: copies the pause binary to a shared volume
 				{
-					Name:    "pause-init",
-					Image:   ExecWrapperImage,
-					Command: []string{"cp", "/sc-pause", PauseBinPath + "/sc-pause"},
+					Name:            "pause-init",
+					Image:           ExecWrapperImage,
+					ImagePullPolicy: ExecWrapperPullPolicy,
+					Command:         []string{"cp", "/sc-pause", PauseBinPath + "/sc-pause"},
 					VolumeMounts: []corev1.VolumeMount{
 						{
 							Name:      PauseVolumeName,

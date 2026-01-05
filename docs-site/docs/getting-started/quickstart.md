@@ -58,11 +58,11 @@ You'll see two pods:
 ```
 NAME            READY   STATUS    RESTARTS   AGE
 demo-provider   2/2     Running   0          10s
-demo-consumer   1/1     Running   0          5s
+demo            1/1     Running   0          5s
 ```
 
 - **demo-provider**: The long-running pod that maintains the rootfs
-- **demo-consumer**: The pod running your actual command
+- **demo**: The pod running your actual command (same name as the StoppableContainerInstance)
 
 ## Check the Status
 
@@ -82,7 +82,7 @@ demo   true      Running   your-node-name       1m
 Check the logs:
 
 ```bash
-kubectl logs demo-consumer
+kubectl logs demo
 ```
 
 ## Stop the Container
@@ -106,8 +106,8 @@ kubectl get pods -w
 ```
 NAME            READY   STATUS        RESTARTS   AGE
 demo-provider   2/2     Running       0          2m
-demo-consumer   1/1     Terminating   0          1m
-demo-consumer   0/1     Terminating   0          1m
+demo            1/1     Terminating   0          1m
+demo            0/1     Terminating   0          1m
 ```
 
 After termination:
@@ -140,7 +140,7 @@ kubectl get pods
 ```
 NAME            READY   STATUS    RESTARTS   AGE
 demo-provider   2/2     Running   0          5m
-demo-consumer   1/1     Running   0          2s
+demo            1/1     Running   0          2s
 ```
 
 ## Clean Up

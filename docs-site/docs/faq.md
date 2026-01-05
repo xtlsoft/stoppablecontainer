@@ -148,14 +148,14 @@ container:
 
 2. Check consumer pod events:
    ```bash
-   kubectl describe pod <name>-consumer
+   kubectl describe pod <name>
    ```
 
 ### Container exits immediately
 
 1. Check consumer logs:
    ```bash
-   kubectl logs <name>-consumer
+   kubectl logs <name>
    ```
 
 2. Ensure command doesn't exit:
@@ -175,7 +175,7 @@ If deletion is stuck:
 
 2. Force delete pods:
    ```bash
-   kubectl delete pod <name>-provider <name>-consumer --force --grace-period=0
+   kubectl delete pod <name>-provider <name> --force --grace-period=0
    ```
 
 3. Remove finalizers if needed:

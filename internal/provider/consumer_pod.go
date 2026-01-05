@@ -122,7 +122,9 @@ func (b *ConsumerPodBuilder) Build() *corev1.Pod {
 					Name:            ConsumerContainerName,
 					Image:           "busybox:stable",
 					ImagePullPolicy: corev1.PullIfNotPresent,
-					Command:         []string{"/bin/sh", "-c", entrypointScript},
+					// Use busybox directly via symlink we preserve in /bin
+					// The /bin is overlayed but busybox is copied there
+					Command:         []string{"/bin/busybox", "sh", "-c", entrypointScript},
 					Env:             env,
 					EnvFrom:         container.EnvFrom,
 					Resources:       container.Resources,
@@ -150,7 +152,9 @@ func (b *ConsumerPodBuilder) Build() *corev1.Pod {
 }
 
 func (b *ConsumerPodBuilder) consumerPodName() string {
-	return fmt.Sprintf("%s-consumer", b.sci.Name)
+	// Consumer pod uses the same name as the SCI for a seamless user experience
+	// Users can use "kubectl exec <name>" directly without knowing about the -consumer suffix
+	return b.sci.Name
 }
 
 func (b *ConsumerPodBuilder) buildUserCommand(container scv1alpha1.ContainerSpec) string {
@@ -184,13 +188,17 @@ func (b *ConsumerPodBuilder) buildEntrypointScript(userCommand, workingDir strin
 	// 2. Copy network configuration
 	// 3. Mount service account secrets (if available)
 	// 4. chroot into the rootfs and run the user command
+	//
+	// Note: We use /bin/busybox for all commands because /bin/* are symlinks
+	// to sc-exec which would try to chroot (not what we want during setup)
 	return fmt.Sprintf(`
 set -e
 
 ROOTFS="%s"
 WORKDIR="%s"
+BB="/bin/busybox"
 
-echo "[consumer] Starting consumer container..."
+$BB echo "[consumer] Starting consumer container..."
 
 # Wait for rootfs to be available (mounted by DaemonSet)
 # Use a fast polling loop initially, then slow down
@@ -198,71 +206,66 @@ attempt=0
 while [ $attempt -lt 120 ]; do
     if [ -d "$ROOTFS/bin" ] || [ -d "$ROOTFS/usr/bin" ]; then
         # Also check that proc is mounted (indicates DaemonSet has completed setup)
-        if mountpoint -q "$ROOTFS/proc" 2>/dev/null; then
+        if $BB mountpoint -q "$ROOTFS/proc" 2>/dev/null; then
             break
         fi
     fi
     attempt=$((attempt + 1))
     if [ $attempt -le 10 ]; then
         # Fast polling for first 2 seconds
-        sleep 0.2
+        $BB sleep 0.2
     else
-        echo "[consumer] Waiting for DaemonSet to complete rootfs setup... ($attempt/120)"
-        sleep 1
+        $BB echo "[consumer] Waiting for DaemonSet to complete rootfs setup... ($attempt/120)"
+        $BB sleep 1
     fi
 done
 
 if [ ! -d "$ROOTFS/bin" ] && [ ! -d "$ROOTFS/usr/bin" ]; then
-    echo "[consumer] ERROR: Rootfs not ready at $ROOTFS"
+    $BB echo "[consumer] ERROR: Rootfs not ready at $ROOTFS"
     exit 1
 fi
 
-if ! mountpoint -q "$ROOTFS/proc" 2>/dev/null; then
-    echo "[consumer] ERROR: Proc mount not ready at $ROOTFS/proc"
+if ! $BB mountpoint -q "$ROOTFS/proc" 2>/dev/null; then
+    $BB echo "[consumer] ERROR: Proc mount not ready at $ROOTFS/proc"
     exit 1
 fi
 
-echo "[consumer] Rootfs ready with mounts from DaemonSet"
+$BB echo "[consumer] Rootfs ready with mounts from DaemonSet"
 
 # Copy network configuration
-mkdir -p "$ROOTFS/etc"
+$BB mkdir -p "$ROOTFS/etc"
 if [ -f "/etc/resolv.conf" ] && [ ! -f "$ROOTFS/etc/resolv.conf" ]; then
-    cp /etc/resolv.conf "$ROOTFS/etc/resolv.conf" 2>/dev/null || true
+    $BB cp /etc/resolv.conf "$ROOTFS/etc/resolv.conf" 2>/dev/null || true
 fi
 
 if [ -f "/etc/hosts" ]; then
-    cp /etc/hosts "$ROOTFS/etc/hosts" 2>/dev/null || true
+    $BB cp /etc/hosts "$ROOTFS/etc/hosts" 2>/dev/null || true
 fi
 
 # Mount service account secrets if available
-# This needs to be done by consumer as it has access to its own secrets
-# Note: Some images use /run instead of /var/run (with /var/run being a symlink)
 SA_PATH="/var/run/secrets/kubernetes.io/serviceaccount"
 if [ -d "$SA_PATH" ]; then
     # Determine the actual path to use in rootfs
-    # If /var/run is a symlink to /run, use /run directly
     if [ -L "$ROOTFS/var/run" ]; then
         ROOTFS_SA_PATH="$ROOTFS/run/secrets/kubernetes.io/serviceaccount"
     else
         ROOTFS_SA_PATH="$ROOTFS$SA_PATH"
     fi
     
-    # Create parent directories
-    mkdir -p "$(dirname "$ROOTFS_SA_PATH")" 2>/dev/null || true
-    mkdir -p "$ROOTFS_SA_PATH" 2>/dev/null || true
+    $BB mkdir -p "$($BB dirname "$ROOTFS_SA_PATH")" 2>/dev/null || true
+    $BB mkdir -p "$ROOTFS_SA_PATH" 2>/dev/null || true
     
-    # Try mount --bind first, fallback to cp if not available
     if [ -d "$ROOTFS_SA_PATH" ]; then
-        mount --bind "$SA_PATH" "$ROOTFS_SA_PATH" 2>/dev/null || \
-            cp -r "$SA_PATH"/* "$ROOTFS_SA_PATH/" 2>/dev/null || true
+        $BB mount --bind "$SA_PATH" "$ROOTFS_SA_PATH" 2>/dev/null || \
+            $BB cp -r "$SA_PATH"/* "$ROOTFS_SA_PATH/" 2>/dev/null || true
     fi
 fi
 
-echo "[consumer] Setup complete, chrooting..."
+$BB echo "[consumer] Setup complete, chrooting..."
 
 cd "$ROOTFS"
 
-exec chroot "$ROOTFS" /bin/sh -c "cd '%s' && %s"
+exec $BB chroot "$ROOTFS" /bin/sh -c "cd '%s' && %s"
 `, RootfsMountPath, workingDir, workingDir, userCommand)
 }
 
@@ -278,6 +281,11 @@ func (b *ConsumerPodBuilder) buildVolumeMounts(userMounts []corev1.VolumeMount) 
 		{
 			Name:      ExecWrapperVolumeName,
 			MountPath: ExecWrapperBinPath,
+		},
+		{
+			// Mount /bin as an overlay so we can intercept all commands
+			Name:      BinOverlayVolumeName,
+			MountPath: "/bin",
 		},
 	}
 
@@ -308,6 +316,12 @@ func (b *ConsumerPodBuilder) buildVolumes(userVolumes []corev1.Volume, hostPath 
 		},
 		{
 			Name: ExecWrapperVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		},
+		{
+			Name: BinOverlayVolumeName,
 			VolumeSource: corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{},
 			},
@@ -379,18 +393,50 @@ func (b *ConsumerPodBuilder) buildAnnotations(userAnnotations map[string]string)
 }
 
 func (b *ConsumerPodBuilder) buildInitContainers(userInitContainers []corev1.Container) []corev1.Container {
+	// The init script:
+	// 1. Copies sc-exec to /.sc-bin
+	// 2. Creates symlinks for common shells/commands in /.sc-bin
+	// 3. These symlinks enable transparent command execution via sc-exec
+	initScript := fmt.Sprintf(`
+set -e
+# Copy sc-exec binary to the wrapper directory
+cp /sc-exec %s/sc-exec
+chmod +x %s/sc-exec
+
+# Setup /bin overlay to intercept all commands
+# All commands in /bin will be symlinks to sc-exec, which will chroot and execute
+# the real binary from the rootfs
+
+# Create symlinks for all common commands - they will all go through sc-exec
+SHELLS="sh bash zsh ash dash ksh csh tcsh fish"
+UTILS="cat ls pwd id whoami uname hostname env printenv grep awk sed head tail echo test [ cp mkdir rm mv touch chmod chown"
+COMMON="python python3 python3.10 python3.11 python3.12 node npm npx ruby perl php java apt apt-get"
+
+for cmd in $SHELLS $UTILS $COMMON; do
+    ln -sf %s/sc-exec /sc-bin-overlay/$cmd 2>/dev/null || true
+done
+
+# Busybox is needed for the entrypoint script to run before chroot
+# We keep it in a separate location so the entrypoint can use it
+cp /bin/busybox /sc-bin-overlay/busybox 2>/dev/null || true
+
+echo "[exec-wrapper-init] Setup /bin overlay for transparent chroot execution"
+`, ExecWrapperBinPath, ExecWrapperBinPath, ExecWrapperBinPath)
+
 	initContainers := []corev1.Container{
 		{
-			Name:  ExecWrapperInitName,
-			Image: ExecWrapperImage,
-			Command: []string{
-				"/bin/sh", "-c",
-				fmt.Sprintf("cp /sc-exec %s/ && chmod +x %s/sc-exec", ExecWrapperBinPath, ExecWrapperBinPath),
-			},
+			Name:            ExecWrapperInitName,
+			Image:           ExecWrapperImage,
+			ImagePullPolicy: ExecWrapperPullPolicy,
+			Command:         []string{"/bin/sh", "-c", initScript},
 			VolumeMounts: []corev1.VolumeMount{
 				{
 					Name:      ExecWrapperVolumeName,
 					MountPath: ExecWrapperBinPath,
+				},
+				{
+					Name:      BinOverlayVolumeName,
+					MountPath: "/sc-bin-overlay",
 				},
 			},
 			Resources: corev1.ResourceRequirements{

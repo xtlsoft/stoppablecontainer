@@ -418,7 +418,7 @@ spec:
 
 			By("verifying consumer pod is running")
 			verifyConsumerPod := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "pod", fmt.Sprintf("%s-consumer", scName),
+				cmd := exec.Command("kubectl", "get", "pod", scName,
 					"-n", testNamespace, "-o", "jsonpath={.status.phase}")
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
@@ -427,7 +427,7 @@ spec:
 			Eventually(verifyConsumerPod, 2*time.Minute, time.Second).Should(Succeed())
 
 			By("verifying consumer pod uses only SYS_CHROOT capability (not privileged, no SYS_ADMIN)")
-			cmd = exec.Command("kubectl", "get", "pod", fmt.Sprintf("%s-consumer", scName),
+			cmd = exec.Command("kubectl", "get", "pod", scName,
 				"-n", testNamespace, "-o", "jsonpath={.spec.containers[0].securityContext.capabilities.add}")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -437,7 +437,7 @@ spec:
 
 			By("verifying consumer can execute commands")
 			verifyConsumerOutput := func(g Gomega) {
-				cmd := exec.Command("kubectl", "logs", fmt.Sprintf("%s-consumer", scName),
+				cmd := exec.Command("kubectl", "logs", scName,
 					"-n", testNamespace, "--tail=10")
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
@@ -453,7 +453,7 @@ spec:
 
 			By("waiting for consumer pod to be deleted")
 			verifyConsumerDeleted := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "pod", fmt.Sprintf("%s-consumer", scName),
+				cmd := exec.Command("kubectl", "get", "pod", scName,
 					"-n", testNamespace, "-o", "jsonpath={.metadata.name}")
 				output, err := utils.Run(cmd)
 				// Pod is deleted when we get NotFound error or empty output

@@ -54,12 +54,14 @@ execWrapper:
   image:
     repository: ghcr.io/xtlsoft/stoppablecontainer-exec
     tag: ""  # Defaults to appVersion
+    pullPolicy: IfNotPresent
 
 # Pause image (used by provider pods)
 pause:
   image:
     repository: ghcr.io/xtlsoft/stoppablecontainer-exec
     tag: ""  # Same as exec-wrapper
+    pullPolicy: IfNotPresent
 
 # Global settings
 global:

@@ -11,13 +11,16 @@ RUN go mod download
 
 COPY cmd/exec-wrapper/ cmd/exec-wrapper/
 COPY cmd/pause/ cmd/pause/
+COPY cmd/provider/ cmd/provider/
 
-# Build both binaries using Go cross-compilation (fast, no QEMU needed)
+# Build all binaries using Go cross-compilation (fast, no QEMU needed)
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -a -o sc-exec cmd/exec-wrapper/main.go
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -a -o sc-pause cmd/pause/main.go
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -a -o sc-provider cmd/provider/main.go
 
 # Use busybox for shell support in init container - this layer uses target platform
 FROM busybox:stable
 COPY --from=builder /workspace/sc-exec /sc-exec
 COPY --from=builder /workspace/sc-pause /sc-pause
+COPY --from=builder /workspace/sc-provider /sc-provider
 ENTRYPOINT ["/sc-exec"]

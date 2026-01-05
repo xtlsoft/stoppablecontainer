@@ -58,6 +58,8 @@ spec:
           env:
             - name: STOPPABLECONTAINER_EXEC_WRAPPER_IMAGE
               value: {{ include "stoppablecontainer.execWrapperImage" . | quote }}
+            - name: STOPPABLECONTAINER_EXEC_WRAPPER_PULL_POLICY
+              value: {{ .Values.execWrapper.image.pullPolicy | quote }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

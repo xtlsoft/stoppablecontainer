@@ -146,8 +146,8 @@ kubectl get stoppablecontainerinstance my-app -o yaml
 # Provider
 kubectl get pod my-app-provider
 
-# Consumer
-kubectl get pod my-app-consumer
+# Consumer (same name as the StoppableContainerInstance)
+kubectl get pod my-app
 ```
 
 ### Manual Cleanup (Emergency)

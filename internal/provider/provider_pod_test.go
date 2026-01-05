@@ -166,7 +166,7 @@ func TestProviderPodBuilder_Build(t *testing.T) {
 	}
 }
 
-func TestProviderPodBuilder_ProviderScript(t *testing.T) {
+func TestProviderPodBuilder_ProviderBinary(t *testing.T) {
 	sci := createTestSCI("test", "default", "alpine:latest")
 	builder := NewProviderPodBuilder(sci)
 	pod := builder.Build()
@@ -184,25 +184,29 @@ func TestProviderPodBuilder_ProviderScript(t *testing.T) {
 		t.Fatal("Provider container not found")
 	}
 
-	// Check command contains the script
-	if len(providerContainer.Command) < 3 {
-		t.Fatal("Provider container command is too short")
+	// Check that provider uses the sc-provider binary
+	if len(providerContainer.Command) != 1 {
+		t.Fatalf("Provider container should have exactly 1 command, got %d", len(providerContainer.Command))
+	}
+	if providerContainer.Command[0] != "/sc-provider" {
+		t.Errorf("Provider container should run /sc-provider, got %s", providerContainer.Command[0])
 	}
 
-	script := providerContainer.Command[2]
+	// Check that provider uses ExecWrapperImage
+	if providerContainer.Image != ExecWrapperImage {
+		t.Errorf("Provider should use ExecWrapperImage, got %s", providerContainer.Image)
+	}
 
-	// Check key parts of the new DaemonSet-based script
-	if !strings.Contains(script, "request.json") {
-		t.Error("Script should write request.json for DaemonSet")
+	// Check environment variables are set
+	envNames := make(map[string]bool)
+	for _, env := range providerContainer.Env {
+		envNames[env.Name] = true
 	}
-	if !strings.Contains(script, "ready.json") {
-		t.Error("Script should wait for ready.json from DaemonSet")
-	}
-	if !strings.Contains(script, "POD_UID") {
-		t.Error("Script should reference POD_UID environment variable")
-	}
-	if !strings.Contains(script, "/propagated/rootfs") {
-		t.Error("Script should check /propagated/rootfs")
+	requiredEnvs := []string{PodUIDEnv, "POD_NAMESPACE", "POD_NAME"}
+	for _, env := range requiredEnvs {
+		if !envNames[env] {
+			t.Errorf("Missing required environment variable: %s", env)
+		}
 	}
 }
 

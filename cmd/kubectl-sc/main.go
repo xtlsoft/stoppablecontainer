@@ -433,17 +433,23 @@ Examples:
 
   # Run with environment variables
   kubectl sc exec my-app -- env`,
-		Args: cobra.MinimumNArgs(1),
+		Args:               cobra.MinimumNArgs(1),
+		DisableFlagParsing: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return fmt.Errorf("name is required")
+			}
 			name := args[0]
 
-			// Find the -- separator
-			cmdArgs := []string{}
-			for i, arg := range args {
-				if arg == "--" && i > 0 {
-					cmdArgs = args[i+1:]
-					break
-				}
+			// ArgsLenAtDash returns the index of "--" if present, or -1
+			// Everything after "--" is in args[dash+1:]
+			dash := cmd.ArgsLenAtDash()
+			var cmdArgs []string
+			if dash >= 0 && dash < len(args) {
+				cmdArgs = args[dash:]
+			} else if len(args) > 1 {
+				// No "--" found, but there are extra args - treat them as command
+				cmdArgs = args[1:]
 			}
 
 			if len(cmdArgs) == 0 {
@@ -465,7 +471,8 @@ Examples:
 			}
 			kubectlArgs = append(kubectlArgs, "-n", ns)
 
-			podName := name + "-consumer"
+			// Consumer pod uses the same name as the SCI
+			podName := name
 			if container != "" {
 				kubectlArgs = append(kubectlArgs, "-c", container)
 			}
@@ -502,7 +509,8 @@ func logsCmd() *cobra.Command {
 				return err
 			}
 
-			podName := name + "-consumer"
+			// Consumer pod uses the same name as the SCI
+			podName := name
 			kubectlArgs := []string{"logs", "-n", ns}
 
 			if follow {

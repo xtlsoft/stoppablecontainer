@@ -106,13 +106,13 @@ kubectl get stoppablecontainer my-app -w
 
 ```bash
 # Current logs
-kubectl logs my-app-consumer
+kubectl logs my-app
 
 # Follow logs
-kubectl logs my-app-consumer -f
+kubectl logs my-app -f
 
 # Previous container logs (after restart)
-kubectl logs my-app-consumer --previous
+kubectl logs my-app --previous
 ```
 
 ### Provider Logs
@@ -123,9 +123,21 @@ kubectl logs my-app-provider -c provider
 
 ## Executing Commands
 
-### Using kubectl-sc (Recommended)
+### Using kubectl exec Directly
 
-The `kubectl-sc` plugin automatically handles exec-wrapper:
+You can use standard `kubectl exec` commands, which will automatically execute inside the chroot environment with the user's rootfs:
+
+```bash
+# Single command
+kubectl exec my-app -- ls -la /
+
+# Interactive shell
+kubectl exec -it my-app -- /bin/bash
+```
+
+### Using kubectl-sc
+
+The `kubectl-sc` plugin is also available and provides the same functionality:
 
 ```bash
 # Single command
@@ -133,18 +145,6 @@ kubectl sc exec my-app -- ls -la /
 
 # Interactive shell
 kubectl sc exec my-app -- /bin/bash
-```
-
-### Using kubectl exec Directly
-
-When using kubectl directly, you must use the exec-wrapper:
-
-```bash
-# Single command (note: use /.sc-bin/sc-exec)
-kubectl exec my-app-consumer -- /.sc-bin/sc-exec ls -la /
-
-# Interactive shell
-kubectl exec -it my-app-consumer -- /.sc-bin/sc-exec /bin/bash
 ```
 
 ### In Provider (Debugging)
@@ -162,7 +162,7 @@ kubectl exec -it my-app-provider -c provider -- /bin/sh
 kubectl patch stoppablecontainer my-app --type=merge -p '{"spec":{"running":false}}'
 
 # Wait for consumer to terminate
-kubectl wait --for=delete pod/my-app-consumer --timeout=60s
+kubectl wait --for=delete pod/my-app --timeout=60s
 
 # Start
 kubectl patch stoppablecontainer my-app --type=merge -p '{"spec":{"running":true}}'
@@ -215,7 +215,7 @@ kubectl get stoppablecontainer -l tier=frontend -o name | xargs -I {} kubectl pa
 
 ```bash
 # Consumer resource usage
-kubectl top pod my-app-consumer
+kubectl top pod my-app
 
 # Provider resource usage
 kubectl top pod my-app-provider
@@ -263,13 +263,13 @@ kubectl get events --field-selector involvedObject.name=my-app
 1. Check if consumer pod is stuck:
 
 ```bash
-kubectl get pod my-app-consumer -o yaml | grep -A 5 "status:"
+kubectl get pod my-app -o yaml | grep -A 5 "status:"
 ```
 
 2. Force delete if necessary:
 
 ```bash
-kubectl delete pod my-app-consumer --force --grace-period=0
+kubectl delete pod my-app --force --grace-period=0
 ```
 
 ### Provider Pod Unhealthy

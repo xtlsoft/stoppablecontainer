@@ -48,9 +48,9 @@ func TestConsumerPodBuilder_Build(t *testing.T) {
 	builder := NewConsumerPodBuilder(sci, "worker-node-1")
 	pod := builder.Build()
 
-	// Check pod name
-	if pod.Name != testAppName+"-consumer" {
-		t.Errorf("Pod name = %q, want %q", pod.Name, testAppName+"-consumer")
+	// Check pod name - consumer pod uses the same name as SCI for seamless experience
+	if pod.Name != testAppName {
+		t.Errorf("Pod name = %q, want %q", pod.Name, testAppName)
 	}
 
 	// Check namespace
@@ -333,16 +333,17 @@ func TestConsumerPodBuilder_BuildVolumeMounts(t *testing.T) {
 	mounts := builder.buildVolumeMounts(userMounts)
 
 	// Should have base mounts + 2 user mounts * 2 (original + rootfs)
-	// Base: PropagatedVolume, ExecWrapperVolume = 2
+	// Base: PropagatedVolume, ExecWrapperVolume, BinOverlayVolume = 3
 	// User: 2 * 2 = 4
-	// Total = 6
-	if len(mounts) != 6 {
-		t.Errorf("Expected 6 mounts, got %d", len(mounts))
+	// Total = 7
+	if len(mounts) != 7 {
+		t.Errorf("Expected 7 mounts, got %d", len(mounts))
 	}
 
 	// Check base mounts exist
 	foundPropagated := false
 	foundExecWrapper := false
+	foundBinOverlay := false
 	for _, m := range mounts {
 		if m.Name == PropagatedVolumeName && m.MountPath == RootfsMountPath {
 			foundPropagated = true
@@ -350,12 +351,18 @@ func TestConsumerPodBuilder_BuildVolumeMounts(t *testing.T) {
 		if m.Name == ExecWrapperVolumeName && m.MountPath == ExecWrapperBinPath {
 			foundExecWrapper = true
 		}
+		if m.Name == BinOverlayVolumeName && m.MountPath == "/bin" {
+			foundBinOverlay = true
+		}
 	}
 	if !foundPropagated {
 		t.Error("Propagated volume mount not found")
 	}
 	if !foundExecWrapper {
 		t.Error("Exec wrapper volume mount not found")
+	}
+	if !foundBinOverlay {
+		t.Error("Bin overlay volume mount not found")
 	}
 
 	// Check user mounts have both original and rootfs versions
@@ -404,16 +411,17 @@ func TestConsumerPodBuilder_BuildVolumes(t *testing.T) {
 	volumes := builder.buildVolumes(userVolumes, "/var/lib/test", hostPathType)
 
 	// Should have base volumes + 2 user volumes * 2 (original + rootfs)
-	// Base: PropagatedVolume, ExecWrapperVolume = 2
+	// Base: PropagatedVolume, ExecWrapperVolume, BinOverlayVolume = 3
 	// User: 2 * 2 = 4
-	// Total = 6
-	if len(volumes) != 6 {
-		t.Errorf("Expected 6 volumes, got %d", len(volumes))
+	// Total = 7
+	if len(volumes) != 7 {
+		t.Errorf("Expected 7 volumes, got %d", len(volumes))
 	}
 
 	// Check base volumes exist
 	foundPropagated := false
 	foundExecWrapper := false
+	foundBinOverlay := false
 	for _, v := range volumes {
 		if v.Name == PropagatedVolumeName {
 			foundPropagated = true
@@ -427,12 +435,21 @@ func TestConsumerPodBuilder_BuildVolumes(t *testing.T) {
 				t.Error("ExecWrapper volume should be emptyDir")
 			}
 		}
+		if v.Name == BinOverlayVolumeName {
+			foundBinOverlay = true
+			if v.EmptyDir == nil {
+				t.Error("BinOverlay volume should be emptyDir")
+			}
+		}
 	}
 	if !foundPropagated {
 		t.Error("Propagated volume not found")
 	}
 	if !foundExecWrapper {
 		t.Error("Exec wrapper volume not found")
+	}
+	if !foundBinOverlay {
+		t.Error("Bin overlay volume not found")
 	}
 
 	// Check user volumes have both original and rootfs versions
