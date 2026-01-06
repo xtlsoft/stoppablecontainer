@@ -18,8 +18,8 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -ldflags
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -a -o sc-pause cmd/pause/main.go
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -a -o sc-provider cmd/provider/main.go
 
-# Use busybox for shell support in init container - this layer uses target platform
-FROM busybox:stable
+# Use scratch image - no shell needed, all functionality is in Go binaries
+FROM scratch
 COPY --from=builder /workspace/sc-exec /sc-exec
 COPY --from=builder /workspace/sc-pause /sc-pause
 COPY --from=builder /workspace/sc-provider /sc-provider

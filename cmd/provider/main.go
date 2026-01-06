@@ -60,6 +60,23 @@ func log(format string, args ...interface{}) {
 }
 
 func main() {
+	// Handle probe helper commands
+	if len(os.Args) >= 3 {
+		switch os.Args[1] {
+		case "--check-file":
+			if _, err := os.Stat(os.Args[2]); err != nil {
+				os.Exit(1)
+			}
+			os.Exit(0)
+		case "--check-dir":
+			info, err := os.Stat(os.Args[2])
+			if err != nil || !info.IsDir() {
+				os.Exit(1)
+			}
+			os.Exit(0)
+		}
+	}
+
 	log("Starting provider process...")
 
 	// Get environment variables

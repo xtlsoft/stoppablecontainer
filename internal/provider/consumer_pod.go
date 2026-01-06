@@ -17,9 +17,7 @@ limitations under the License.
 package provider
 
 import (
-	"fmt"
 	"path/filepath"
-	"strings"
 
 	scv1alpha1 "github.com/xtlsoft/stoppablecontainer/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -49,11 +47,8 @@ func (b *ConsumerPodBuilder) Build() *corev1.Pod {
 	template := b.sci.Spec.Template
 	container := template.Container
 
-	// Build the user's command
+	// Build the user's command as args for sc-exec --entrypoint
 	userCommand := b.buildUserCommand(container)
-
-	// The entrypoint script that sets up chroot and runs the command
-	entrypointScript := b.buildEntrypointScript(userCommand, container.WorkingDir)
 
 	// Build volume mounts
 	volumeMounts := b.buildVolumeMounts(container.VolumeMounts)
@@ -116,15 +111,14 @@ func (b *ConsumerPodBuilder) Build() *corev1.Pod {
 			// Init containers
 			InitContainers: initContainers,
 
-			// Main container
+			// Main container - uses exec-wrapper image for minimal footprint
 			Containers: []corev1.Container{
 				{
 					Name:            ConsumerContainerName,
-					Image:           "busybox:stable",
-					ImagePullPolicy: corev1.PullIfNotPresent,
-					// Use busybox directly via symlink we preserve in /bin
-					// The /bin is overlayed but busybox is copied there
-					Command:         []string{"/bin/busybox", "sh", "-c", entrypointScript},
+					Image:           ExecWrapperImage,
+					ImagePullPolicy: ExecWrapperPullPolicy,
+					// Use sc-exec --entrypoint to wait for rootfs and run user command
+					Command:         b.buildEntrypointCommand(userCommand, container.WorkingDir),
 					Env:             env,
 					EnvFrom:         container.EnvFrom,
 					Resources:       container.Resources,
@@ -134,10 +128,9 @@ func (b *ConsumerPodBuilder) Build() *corev1.Pod {
 					ReadinessProbe: &corev1.Probe{
 						ProbeHandler: corev1.ProbeHandler{
 							Exec: &corev1.ExecAction{
-								// Use /bin/busybox directly to avoid sc-exec interception
-								// sc-exec would chroot and then the /rootfs path wouldn't exist
-								// Use -e (exists) instead of -d because /bin may be a symlink (e.g., on Ubuntu)
-								Command: []string{"/bin/busybox", "test", "-e", RootfsMountPath + "/bin"},
+								// Use sc-exec --ready to check if rootfs is ready
+								// This is a built-in command that doesn't chroot
+								Command: []string{ExecWrapperBinPath + "/sc-exec", "--ready"},
 							},
 						},
 						InitialDelaySeconds: 1,
@@ -160,116 +153,30 @@ func (b *ConsumerPodBuilder) consumerPodName() string {
 	return b.sci.Name
 }
 
-func (b *ConsumerPodBuilder) buildUserCommand(container scv1alpha1.ContainerSpec) string {
+func (b *ConsumerPodBuilder) buildUserCommand(container scv1alpha1.ContainerSpec) []string {
 	if len(container.Command) == 0 && len(container.Args) == 0 {
-		return "exec /bin/sh"
+		return []string{"/bin/sh"}
 	}
 
 	var parts []string
 	parts = append(parts, container.Command...)
 	parts = append(parts, container.Args...)
 
-	quoted := make([]string, len(parts))
-	for i, p := range parts {
-		quoted[i] = fmt.Sprintf("'%s'", strings.ReplaceAll(p, "'", "'\\''"))
-	}
-
-	return "exec " + strings.Join(quoted, " ")
+	return parts
 }
 
-func (b *ConsumerPodBuilder) buildEntrypointScript(userCommand, workingDir string) string {
+// buildEntrypointCommand creates the command for the consumer container
+// It uses sc-exec --entrypoint which handles waiting for rootfs, setting up
+// network config, and chrooting into the rootfs to run the user command
+func (b *ConsumerPodBuilder) buildEntrypointCommand(userCommand []string, workingDir string) []string {
 	if workingDir == "" {
 		workingDir = "/"
 	}
 
-	// The DaemonSet has already:
-	// 1. Created the overlayfs mount at $ROOTFS
-	// 2. Mounted /proc, /dev, /sys into the rootfs
-	//
-	// Consumer only needs to:
-	// 1. Wait for rootfs to be ready (mounts propagated)
-	// 2. Copy network configuration
-	// 3. Mount service account secrets (if available)
-	// 4. chroot into the rootfs and run the user command
-	//
-	// Note: We use /bin/busybox for all commands because /bin/* are symlinks
-	// to sc-exec which would try to chroot (not what we want during setup)
-	return fmt.Sprintf(`
-set -e
-
-ROOTFS="%s"
-WORKDIR="%s"
-BB="/bin/busybox"
-
-$BB echo "[consumer] Starting consumer container..."
-
-# Wait for rootfs to be available (mounted by DaemonSet)
-# Use a fast polling loop initially, then slow down
-attempt=0
-while [ $attempt -lt 120 ]; do
-    if [ -d "$ROOTFS/bin" ] || [ -d "$ROOTFS/usr/bin" ]; then
-        # Also check that proc is mounted (indicates DaemonSet has completed setup)
-        if $BB mountpoint -q "$ROOTFS/proc" 2>/dev/null; then
-            break
-        fi
-    fi
-    attempt=$((attempt + 1))
-    if [ $attempt -le 10 ]; then
-        # Fast polling for first 2 seconds
-        $BB sleep 0.2
-    else
-        $BB echo "[consumer] Waiting for DaemonSet to complete rootfs setup... ($attempt/120)"
-        $BB sleep 1
-    fi
-done
-
-if [ ! -d "$ROOTFS/bin" ] && [ ! -d "$ROOTFS/usr/bin" ]; then
-    $BB echo "[consumer] ERROR: Rootfs not ready at $ROOTFS"
-    exit 1
-fi
-
-if ! $BB mountpoint -q "$ROOTFS/proc" 2>/dev/null; then
-    $BB echo "[consumer] ERROR: Proc mount not ready at $ROOTFS/proc"
-    exit 1
-fi
-
-$BB echo "[consumer] Rootfs ready with mounts from DaemonSet"
-
-# Copy network configuration
-$BB mkdir -p "$ROOTFS/etc"
-if [ -f "/etc/resolv.conf" ] && [ ! -f "$ROOTFS/etc/resolv.conf" ]; then
-    $BB cp /etc/resolv.conf "$ROOTFS/etc/resolv.conf" 2>/dev/null || true
-fi
-
-if [ -f "/etc/hosts" ]; then
-    $BB cp /etc/hosts "$ROOTFS/etc/hosts" 2>/dev/null || true
-fi
-
-# Mount service account secrets if available
-SA_PATH="/var/run/secrets/kubernetes.io/serviceaccount"
-if [ -d "$SA_PATH" ]; then
-    # Determine the actual path to use in rootfs
-    if [ -L "$ROOTFS/var/run" ]; then
-        ROOTFS_SA_PATH="$ROOTFS/run/secrets/kubernetes.io/serviceaccount"
-    else
-        ROOTFS_SA_PATH="$ROOTFS$SA_PATH"
-    fi
-    
-    $BB mkdir -p "$($BB dirname "$ROOTFS_SA_PATH")" 2>/dev/null || true
-    $BB mkdir -p "$ROOTFS_SA_PATH" 2>/dev/null || true
-    
-    if [ -d "$ROOTFS_SA_PATH" ]; then
-        $BB mount --bind "$SA_PATH" "$ROOTFS_SA_PATH" 2>/dev/null || \
-            $BB cp -r "$SA_PATH"/* "$ROOTFS_SA_PATH/" 2>/dev/null || true
-    fi
-fi
-
-$BB echo "[consumer] Setup complete, chrooting..."
-
-cd "$ROOTFS"
-
-exec $BB chroot "$ROOTFS" /bin/sh -c "cd '%s' && %s"
-`, RootfsMountPath, workingDir, workingDir, userCommand)
+	// Command format: sc-exec --entrypoint <workdir> <command...>
+	cmd := []string{"/sc-exec", "--entrypoint", workingDir}
+	cmd = append(cmd, userCommand...)
+	return cmd
 }
 
 func (b *ConsumerPodBuilder) buildVolumeMounts(userMounts []corev1.VolumeMount) []corev1.VolumeMount {
@@ -396,42 +303,14 @@ func (b *ConsumerPodBuilder) buildAnnotations(userAnnotations map[string]string)
 }
 
 func (b *ConsumerPodBuilder) buildInitContainers(userInitContainers []corev1.Container) []corev1.Container {
-	// The init script:
-	// 1. Copies sc-exec to /.sc-bin
-	// 2. Creates symlinks for common shells/commands in /.sc-bin
-	// 3. These symlinks enable transparent command execution via sc-exec
-	initScript := fmt.Sprintf(`
-set -e
-# Copy sc-exec binary to the wrapper directory
-cp /sc-exec %s/sc-exec
-chmod +x %s/sc-exec
-
-# Setup /bin overlay to intercept all commands
-# All commands in /bin will be symlinks to sc-exec, which will chroot and execute
-# the real binary from the rootfs
-
-# Create symlinks for all common commands - they will all go through sc-exec
-SHELLS="sh bash zsh ash dash ksh csh tcsh fish"
-UTILS="cat ls pwd id whoami uname hostname env printenv grep awk sed head tail echo test [ cp mkdir rm mv touch chmod chown"
-COMMON="python python3 python3.10 python3.11 python3.12 node npm npx ruby perl php java apt apt-get"
-
-for cmd in $SHELLS $UTILS $COMMON; do
-    ln -sf %s/sc-exec /sc-bin-overlay/$cmd 2>/dev/null || true
-done
-
-# Busybox is needed for the entrypoint script to run before chroot
-# We keep it in a separate location so the entrypoint can use it
-cp /bin/busybox /sc-bin-overlay/busybox 2>/dev/null || true
-
-echo "[exec-wrapper-init] Setup /bin overlay for transparent chroot execution"
-`, ExecWrapperBinPath, ExecWrapperBinPath, ExecWrapperBinPath)
-
+	// Use sc-exec --init to set up the bin overlay
+	// This copies sc-exec to /.sc-bin and creates symlinks for common commands
 	initContainers := []corev1.Container{
 		{
 			Name:            ExecWrapperInitName,
 			Image:           ExecWrapperImage,
 			ImagePullPolicy: ExecWrapperPullPolicy,
-			Command:         []string{"/bin/sh", "-c", initScript},
+			Command:         []string{"/sc-exec", "--init", "/sc-bin-overlay"},
 			VolumeMounts: []corev1.VolumeMount{
 				{
 					Name:      ExecWrapperVolumeName,

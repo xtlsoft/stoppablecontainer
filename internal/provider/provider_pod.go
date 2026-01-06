@@ -219,7 +219,7 @@ func (b *ProviderPodBuilder) Build() *corev1.Pod {
 					ReadinessProbe: &corev1.Probe{
 						ProbeHandler: corev1.ProbeHandler{
 							Exec: &corev1.ExecAction{
-								Command: []string{"test", "-f", "/propagated/ready"},
+								Command: []string{"/sc-provider", "--check-file", "/propagated/ready"},
 							},
 						},
 						InitialDelaySeconds: 1,
@@ -229,7 +229,7 @@ func (b *ProviderPodBuilder) Build() *corev1.Pod {
 					LivenessProbe: &corev1.Probe{
 						ProbeHandler: corev1.ProbeHandler{
 							Exec: &corev1.ExecAction{
-								Command: []string{"test", "-d", "/propagated/rootfs"},
+								Command: []string{"/sc-provider", "--check-dir", "/propagated/rootfs"},
 							},
 						},
 						InitialDelaySeconds: 30,
@@ -245,7 +245,7 @@ func (b *ProviderPodBuilder) Build() *corev1.Pod {
 					Name:            "pause-init",
 					Image:           ExecWrapperImage,
 					ImagePullPolicy: ExecWrapperPullPolicy,
-					Command:         []string{"cp", "/sc-pause", PauseBinPath + "/sc-pause"},
+					Command:         []string{"/sc-exec", "--copy", "/sc-pause", PauseBinPath + "/sc-pause"},
 					VolumeMounts: []corev1.VolumeMount{
 						{
 							Name:      PauseVolumeName,

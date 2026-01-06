@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 )
 
 const (
@@ -57,6 +58,58 @@ func main() {
 	execName := filepath.Base(os.Args[0])
 	debug("Invoked as: %s, args: %v", execName, os.Args)
 
+	// Handle special built-in commands
+	if execName == "sc-exec" || execName == "stoppablecontainer-exec" {
+		if len(os.Args) >= 2 {
+			switch os.Args[1] {
+			case "--ready":
+				// Readiness probe: check if rootfs is ready
+				handleReadinessProbe()
+				return
+			case "--entrypoint":
+				// Entrypoint mode: wait for rootfs and run user command
+				if len(os.Args) < 4 {
+					fatal("Usage: sc-exec --entrypoint <workdir> <command...>")
+				}
+				handleEntrypoint(os.Args[2], os.Args[3:])
+				return
+			case "--init":
+				// Init mode: setup /bin overlay with symlinks
+				if len(os.Args) < 3 {
+					fatal("Usage: sc-exec --init <overlay-path>")
+				}
+				handleInit(os.Args[2])
+				return
+			case "--copy":
+				// Copy mode: copy a file from src to dst
+				if len(os.Args) < 4 {
+					fatal("Usage: sc-exec --copy <src> <dst>")
+				}
+				handleCopy(os.Args[2], os.Args[3])
+				return
+			case "--check-file":
+				// Check if a file exists
+				if len(os.Args) < 3 {
+					fatal("Usage: sc-exec --check-file <path>")
+				}
+				if _, err := os.Stat(os.Args[2]); err != nil {
+					os.Exit(1)
+				}
+				os.Exit(0)
+			case "--check-dir":
+				// Check if a directory exists
+				if len(os.Args) < 3 {
+					fatal("Usage: sc-exec --check-dir <path>")
+				}
+				info, err := os.Stat(os.Args[2])
+				if err != nil || !info.IsDir() {
+					os.Exit(1)
+				}
+				os.Exit(0)
+			}
+		}
+	}
+
 	// If called directly as sc-exec, expect: sc-exec <command> [args...]
 	// If called via symlink (e.g., /bin/bash -> sc-exec), execute the symlink name
 	var command string
@@ -66,6 +119,11 @@ func main() {
 		if len(os.Args) < 2 {
 			fmt.Fprintf(os.Stderr, "Usage: %s <command> [args...]\n", os.Args[0])
 			fmt.Fprintf(os.Stderr, "\nThis wrapper executes commands inside the chroot at %s\n", RootfsPath)
+			fmt.Fprintf(os.Stderr, "\nBuilt-in commands:\n")
+			fmt.Fprintf(os.Stderr, "  --ready              Check if rootfs is ready (for readiness probe)\n")
+			fmt.Fprintf(os.Stderr, "  --entrypoint <wd> <cmd...>  Run entrypoint in chroot\n")
+			fmt.Fprintf(os.Stderr, "  --init <overlay>     Setup /bin overlay with symlinks\n")
+			fmt.Fprintf(os.Stderr, "  --copy <src> <dst>   Copy a file from src to dst\n")
 			os.Exit(1)
 		}
 		command = os.Args[1]
@@ -100,6 +158,254 @@ func main() {
 
 	// Perform chroot and exec
 	chrootExec(binaryPath, args)
+}
+
+// handleReadinessProbe checks if the rootfs is ready
+func handleReadinessProbe() {
+	// Check if rootfs directory exists
+	if _, err := os.Stat(RootfsPath); os.IsNotExist(err) {
+		debug("Rootfs not found at %s", RootfsPath)
+		os.Exit(1)
+	}
+
+	// Check if /bin or /usr/bin exists (indicating rootfs is mounted)
+	binExists := false
+	for _, p := range []string{RootfsPath + "/bin", RootfsPath + "/usr/bin"} {
+		if info, err := os.Lstat(p); err == nil {
+			// Accept both directories and symlinks (Ubuntu has /bin -> usr/bin)
+			if info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+				binExists = true
+				break
+			}
+		}
+	}
+
+	if !binExists {
+		debug("Rootfs bin directory not found")
+		os.Exit(1)
+	}
+
+	// Check if proc is mounted (indicates DaemonSet has completed setup)
+	procPath := RootfsPath + "/proc"
+	if !isMounted(procPath) {
+		debug("Proc not mounted at %s", procPath)
+		os.Exit(1)
+	}
+
+	// All checks passed
+	debug("Rootfs is ready")
+	os.Exit(0)
+}
+
+// handleEntrypoint runs the user command in a chroot environment
+func handleEntrypoint(workdir string, command []string) {
+	fmt.Println("[sc-entrypoint] Starting consumer container...")
+
+	// Wait for rootfs to be available
+	maxAttempts := 120
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		binExists := false
+		for _, p := range []string{RootfsPath + "/bin", RootfsPath + "/usr/bin"} {
+			if info, err := os.Lstat(p); err == nil {
+				if info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+					binExists = true
+					break
+				}
+			}
+		}
+
+		if binExists && isMounted(RootfsPath+"/proc") {
+			break
+		}
+
+		if attempt < 10 {
+			time.Sleep(200 * time.Millisecond)
+		} else {
+			if attempt%10 == 0 {
+				fmt.Printf("[sc-entrypoint] Waiting for DaemonSet to complete rootfs setup... (%d/%d)\n", attempt, maxAttempts)
+			}
+			time.Sleep(time.Second)
+		}
+
+		if attempt == maxAttempts-1 {
+			fatal("Rootfs not ready after %d attempts", maxAttempts)
+		}
+	}
+
+	fmt.Println("[sc-entrypoint] Rootfs ready with mounts from DaemonSet")
+
+	// Copy network configuration
+	copyNetworkConfig()
+
+	// Mount service account secrets
+	mountServiceAccountSecrets()
+
+	fmt.Println("[sc-entrypoint] Setup complete, chrooting...")
+
+	// Chroot and exec
+	if err := syscall.Chroot(RootfsPath); err != nil {
+		fatal("Failed to chroot: %v", err)
+	}
+
+	if err := os.Chdir("/"); err != nil {
+		fatal("Failed to chdir to /: %v", err)
+	}
+
+	if workdir != "" && workdir != "/" {
+		if err := os.Chdir(workdir); err != nil {
+			debug("Could not change to workdir %s: %v", workdir, err)
+		}
+	}
+
+	// Find and execute the command
+	binaryPath := ""
+	cmdName := command[0]
+	if strings.HasPrefix(cmdName, "/") {
+		if _, err := os.Stat(cmdName); err == nil {
+			binaryPath = cmdName
+		}
+	} else {
+		searchPaths := []string{"/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin"}
+		for _, dir := range searchPaths {
+			candidate := dir + "/" + cmdName
+			if _, err := os.Stat(candidate); err == nil {
+				binaryPath = candidate
+				break
+			}
+		}
+	}
+
+	if binaryPath == "" {
+		fatal("Command not found: %s", cmdName)
+	}
+
+	env := os.Environ()
+	if err := syscall.Exec(binaryPath, command, env); err != nil {
+		fatal("Failed to exec %s: %v", binaryPath, err)
+	}
+}
+
+// handleInit sets up the /bin overlay with symlinks to sc-exec
+func handleInit(overlayPath string) {
+	fmt.Println("[sc-init] Setting up /bin overlay for transparent chroot execution")
+
+	// Copy sc-exec to /.sc-bin
+	scBinPath := "/.sc-bin"
+	if err := os.MkdirAll(scBinPath, 0755); err != nil {
+		fatal("Failed to create %s: %v", scBinPath, err)
+	}
+
+	// Copy our own binary
+	self, err := os.Executable()
+	if err != nil {
+		fatal("Failed to get executable path: %v", err)
+	}
+
+	destPath := scBinPath + "/sc-exec"
+	if err := copyFile(self, destPath); err != nil {
+		fatal("Failed to copy sc-exec: %v", err)
+	}
+	if err := os.Chmod(destPath, 0755); err != nil {
+		fatal("Failed to chmod sc-exec: %v", err)
+	}
+
+	// Create symlinks for common commands
+	commands := []string{
+		// Shells
+		"sh", "bash", "zsh", "ash", "dash", "ksh", "csh", "tcsh", "fish",
+		// Common utilities
+		"cat", "ls", "pwd", "id", "whoami", "uname", "hostname", "env", "printenv",
+		"grep", "awk", "sed", "head", "tail", "echo", "test", "[", "cp", "mkdir",
+		"rm", "mv", "touch", "chmod", "chown", "date", "sleep", "true", "false",
+		// Programming languages
+		"python", "python3", "python3.10", "python3.11", "python3.12",
+		"node", "npm", "npx", "ruby", "perl", "php", "java",
+		// Package managers
+		"apt", "apt-get", "yum", "dnf", "apk",
+	}
+
+	for _, cmd := range commands {
+		linkPath := overlayPath + "/" + cmd
+		if err := os.Symlink(destPath, linkPath); err != nil && !os.IsExist(err) {
+			debug("Failed to create symlink for %s: %v", cmd, err)
+		}
+	}
+
+	fmt.Println("[sc-init] Setup complete")
+}
+
+// handleCopy copies a file from src to dst
+func handleCopy(src, dst string) {
+	if err := copyFile(src, dst); err != nil {
+		fatal("Failed to copy %s to %s: %v", src, dst, err)
+	}
+	if err := os.Chmod(dst, 0755); err != nil {
+		fatal("Failed to chmod %s: %v", dst, err)
+	}
+	debug("Copied %s to %s", src, dst)
+}
+
+// copyFile copies a file from src to dst
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0755)
+}
+
+// copyNetworkConfig copies network configuration files to rootfs
+func copyNetworkConfig() {
+	configs := []string{"/etc/resolv.conf", "/etc/hosts"}
+	for _, cfg := range configs {
+		targetPath := RootfsPath + cfg
+		if _, err := os.Stat(cfg); err == nil {
+			// Ensure target directory exists
+			_ = os.MkdirAll(filepath.Dir(targetPath), 0755)
+			if data, err := os.ReadFile(cfg); err == nil {
+				_ = os.WriteFile(targetPath, data, 0644)
+			}
+		}
+	}
+}
+
+// mountServiceAccountSecrets mounts the service account secrets into rootfs
+func mountServiceAccountSecrets() {
+	saPath := "/var/run/secrets/kubernetes.io/serviceaccount"
+	if _, err := os.Stat(saPath); os.IsNotExist(err) {
+		return
+	}
+
+	// Determine target path (handle /var/run -> /run symlink)
+	targetPath := RootfsPath + saPath
+	if info, err := os.Lstat(RootfsPath + "/var/run"); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			targetPath = RootfsPath + "/run/secrets/kubernetes.io/serviceaccount"
+		}
+	}
+
+	// Create target directory
+	if err := os.MkdirAll(targetPath, 0755); err != nil {
+		debug("Failed to create SA path: %v", err)
+		return
+	}
+
+	// Try bind mount first, fall back to copy
+	if err := syscall.Mount(saPath, targetPath, "", syscall.MS_BIND, ""); err != nil {
+		debug("Bind mount failed, copying SA secrets: %v", err)
+		// Copy files
+		entries, err := os.ReadDir(saPath)
+		if err != nil {
+			return
+		}
+		for _, entry := range entries {
+			srcFile := saPath + "/" + entry.Name()
+			dstFile := targetPath + "/" + entry.Name()
+			if data, err := os.ReadFile(srcFile); err == nil {
+				_ = os.WriteFile(dstFile, data, 0644)
+			}
+		}
+	}
 }
 
 // setupMounts creates necessary bind mounts inside rootfs.

@@ -17,7 +17,6 @@ limitations under the License.
 package provider
 
 import (
-	"strings"
 	"testing"
 
 	scv1alpha1 "github.com/xtlsoft/stoppablecontainer/api/v1alpha1"
@@ -244,19 +243,19 @@ func TestConsumerPodBuilder_BuildUserCommand(t *testing.T) {
 	tests := []struct {
 		name      string
 		container scv1alpha1.ContainerSpec
-		expected  string
+		expected  []string
 	}{
 		{
 			name:      "no command or args",
 			container: scv1alpha1.ContainerSpec{},
-			expected:  "exec /bin/sh",
+			expected:  []string{"/bin/sh"},
 		},
 		{
 			name: "simple command",
 			container: scv1alpha1.ContainerSpec{
 				Command: []string{"/bin/bash"},
 			},
-			expected: "exec '/bin/bash'",
+			expected: []string{"/bin/bash"},
 		},
 		{
 			name: "command with args",
@@ -264,53 +263,76 @@ func TestConsumerPodBuilder_BuildUserCommand(t *testing.T) {
 				Command: []string{"/bin/sh", "-c"},
 				Args:    []string{"echo hello"},
 			},
-			expected: "exec '/bin/sh' '-c' 'echo hello'",
+			expected: []string{"/bin/sh", "-c", "echo hello"},
 		},
 		{
 			name: "command with quotes",
 			container: scv1alpha1.ContainerSpec{
 				Command: []string{"/bin/sh", "-c", "echo 'hello world'"},
 			},
-			expected: "exec '/bin/sh' '-c' 'echo '\\''hello world'\\'''",
+			expected: []string{"/bin/sh", "-c", "echo 'hello world'"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := builder.buildUserCommand(tt.container)
-			if result != tt.expected {
-				t.Errorf("buildUserCommand() = %q, want %q", result, tt.expected)
+			if len(result) != len(tt.expected) {
+				t.Errorf("buildUserCommand() = %v, want %v", result, tt.expected)
+				return
+			}
+			for i := range result {
+				if result[i] != tt.expected[i] {
+					t.Errorf("buildUserCommand()[%d] = %q, want %q", i, result[i], tt.expected[i])
+				}
 			}
 		})
 	}
 }
 
-func TestConsumerPodBuilder_BuildEntrypointScript(t *testing.T) {
+func TestConsumerPodBuilder_BuildEntrypointCommand(t *testing.T) {
 	sci := createTestSCI("test", "default", "alpine:latest")
 	builder := NewConsumerPodBuilder(sci, "node-1")
 
-	script := builder.buildEntrypointScript("exec /bin/sh", "/app")
+	tests := []struct {
+		name       string
+		userCmd    []string
+		workingDir string
+		expected   []string
+	}{
+		{
+			name:       "simple command with workdir",
+			userCmd:    []string{"/bin/sh"},
+			workingDir: "/app",
+			expected:   []string{"/sc-exec", "--entrypoint", "/app", "/bin/sh"},
+		},
+		{
+			name:       "command with args",
+			userCmd:    []string{"/bin/sh", "-c", "echo hello"},
+			workingDir: "/",
+			expected:   []string{"/sc-exec", "--entrypoint", "/", "/bin/sh", "-c", "echo hello"},
+		},
+		{
+			name:       "empty workdir defaults to /",
+			userCmd:    []string{"/bin/bash"},
+			workingDir: "",
+			expected:   []string{"/sc-exec", "--entrypoint", "/", "/bin/bash"},
+		},
+	}
 
-	// Check key parts - note: mount operations are now handled by DaemonSet
-	if !strings.Contains(script, `ROOTFS="/rootfs"`) {
-		t.Error("Script should set ROOTFS variable")
-	}
-	if !strings.Contains(script, `WORKDIR="/app"`) {
-		t.Error("Script should set WORKDIR variable")
-	}
-	// Script should wait for DaemonSet to complete mounts
-	if !strings.Contains(script, "Waiting for DaemonSet") {
-		t.Error("Script should wait for DaemonSet")
-	}
-	// Script should check that proc is mounted (by DaemonSet)
-	if !strings.Contains(script, "mountpoint") && !strings.Contains(script, "/proc") {
-		t.Error("Script should check proc mount")
-	}
-	if !strings.Contains(script, "chroot") {
-		t.Error("Script should use chroot")
-	}
-	if !strings.Contains(script, "exec /bin/sh") {
-		t.Error("Script should contain user command")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := builder.buildEntrypointCommand(tt.userCmd, tt.workingDir)
+			if len(result) != len(tt.expected) {
+				t.Errorf("buildEntrypointCommand() = %v, want %v", result, tt.expected)
+				return
+			}
+			for i := range result {
+				if result[i] != tt.expected[i] {
+					t.Errorf("buildEntrypointCommand()[%d] = %q, want %q", i, result[i], tt.expected[i])
+				}
+			}
+		})
 	}
 }
 
