@@ -19,7 +19,6 @@ package provider
 import (
 	"testing"
 
-	scv1alpha1 "github.com/xtlsoft/stoppablecontainer/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -242,24 +241,24 @@ func TestConsumerPodBuilder_BuildUserCommand(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		container scv1alpha1.ContainerSpec
+		container corev1.Container
 		expected  []string
 	}{
 		{
 			name:      "no command or args",
-			container: scv1alpha1.ContainerSpec{},
+			container: corev1.Container{},
 			expected:  []string{"/bin/sh"},
 		},
 		{
 			name: "simple command",
-			container: scv1alpha1.ContainerSpec{
+			container: corev1.Container{
 				Command: []string{"/bin/bash"},
 			},
 			expected: []string{"/bin/bash"},
 		},
 		{
 			name: "command with args",
-			container: scv1alpha1.ContainerSpec{
+			container: corev1.Container{
 				Command: []string{"/bin/sh", "-c"},
 				Args:    []string{"echo hello"},
 			},
@@ -267,7 +266,7 @@ func TestConsumerPodBuilder_BuildUserCommand(t *testing.T) {
 		},
 		{
 			name: "command with quotes",
-			container: scv1alpha1.ContainerSpec{
+			container: corev1.Container{
 				Command: []string{"/bin/sh", "-c", "echo 'hello world'"},
 			},
 			expected: []string{"/bin/sh", "-c", "echo 'hello world'"},
@@ -276,7 +275,7 @@ func TestConsumerPodBuilder_BuildUserCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := builder.buildUserCommand(tt.container)
+			result := builder.buildUserCommand(&tt.container)
 			if len(result) != len(tt.expected) {
 				t.Errorf("buildUserCommand() = %v, want %v", result, tt.expected)
 				return

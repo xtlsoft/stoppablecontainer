@@ -45,36 +45,64 @@ func (b *ConsumerPodBuilder) Build() *corev1.Pod {
 	hostPathType := corev1.HostPathDirectory
 
 	template := b.sci.Spec.Template
-	container := template.Container
+	podSpec := template.Spec.DeepCopy()
+
+	// Validate we have at least one container
+	if len(podSpec.Containers) == 0 {
+		// Fallback: create a minimal container if none specified
+		podSpec.Containers = []corev1.Container{{
+			Name:  ConsumerContainerName,
+			Image: "busybox:stable",
+		}}
+	}
+
+	// Get the first container as the main workload container
+	mainContainer := &podSpec.Containers[0]
 
 	// Build the user's command as args for sc-exec --entrypoint
-	userCommand := b.buildUserCommand(container)
+	userCommand := b.buildUserCommand(mainContainer)
 
-	// Build volume mounts
-	volumeMounts := b.buildVolumeMounts(container.VolumeMounts)
+	// Build volume mounts for the main container
+	mainContainer.VolumeMounts = b.buildVolumeMounts(mainContainer.VolumeMounts)
 
 	// Build volumes
-	volumes := b.buildVolumes(template.Volumes, hostPath, hostPathType)
+	podSpec.Volumes = b.buildVolumes(podSpec.Volumes, hostPath, hostPathType)
 
-	// Environment variables
-	env := container.Env
-	env = append(env, corev1.EnvVar{
+	// Add SC_ROOTFS environment variable
+	mainContainer.Env = append(mainContainer.Env, corev1.EnvVar{
 		Name:  "SC_ROOTFS",
 		Value: RootfsMountPath,
 	})
 
-	// Build init containers
-	initContainers := b.buildInitContainers(template.InitContainers)
+	// Build init containers (prepend our init container)
+	podSpec.InitContainers = b.buildInitContainers(podSpec.InitContainers)
+
+	// Override container settings for exec-wrapper
+	mainContainer.Name = ConsumerContainerName
+	mainContainer.Image = ExecWrapperImage
+	mainContainer.ImagePullPolicy = ExecWrapperPullPolicy
+	mainContainer.Command = b.buildEntrypointCommand(userCommand, mainContainer.WorkingDir)
+	mainContainer.Args = nil // Args are incorporated into Command
+	mainContainer.SecurityContext = b.buildSecurityContext(mainContainer.SecurityContext)
+	mainContainer.ReadinessProbe = &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{
+			Exec: &corev1.ExecAction{
+				Command: []string{ExecWrapperBinPath + "/sc-exec", "--ready"},
+			},
+		},
+		InitialDelaySeconds: 1,
+		PeriodSeconds:       5,
+	}
+
+	// Override pod-level settings that must be controlled by the controller
+	podSpec.NodeName = b.nodeName
+	podSpec.RestartPolicy = corev1.RestartPolicyAlways
 
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      b.consumerPodName(),
-			Namespace: b.sci.Namespace,
-			Labels: map[string]string{
-				LabelManagedBy: "stoppablecontainer",
-				LabelInstance:  b.sci.Name,
-				LabelRole:      "consumer",
-			},
+			Name:        b.consumerPodName(),
+			Namespace:   b.sci.Namespace,
+			Labels:      b.buildLabels(template.Metadata.Labels),
 			Annotations: b.buildAnnotations(template.Metadata.Annotations),
 			OwnerReferences: []metav1.OwnerReference{
 				{
@@ -87,63 +115,7 @@ func (b *ConsumerPodBuilder) Build() *corev1.Pod {
 				},
 			},
 		},
-		Spec: corev1.PodSpec{
-			// Must run on the same node as provider
-			NodeName: b.nodeName,
-
-			// Use a minimal base image that has chroot capabilities
-			RestartPolicy: corev1.RestartPolicyAlways,
-
-			// Service account from template
-			ServiceAccountName: template.ServiceAccountName,
-
-			// Affinity and tolerations
-			Affinity:    template.Affinity,
-			Tolerations: template.Tolerations,
-
-			// Network settings
-			HostNetwork: template.HostNetwork,
-			DNSPolicy:   template.DNSPolicy,
-
-			// Runtime class
-			RuntimeClassName: template.RuntimeClassName,
-
-			// Init containers
-			InitContainers: initContainers,
-
-			// Main container - uses exec-wrapper image for minimal footprint
-			Containers: []corev1.Container{
-				{
-					Name:            ConsumerContainerName,
-					Image:           ExecWrapperImage,
-					ImagePullPolicy: ExecWrapperPullPolicy,
-					// Use sc-exec --entrypoint to wait for rootfs and run user command
-					Command:         b.buildEntrypointCommand(userCommand, container.WorkingDir),
-					Env:             env,
-					EnvFrom:         container.EnvFrom,
-					Resources:       container.Resources,
-					Ports:           container.Ports,
-					VolumeMounts:    volumeMounts,
-					SecurityContext: b.buildSecurityContext(container.SecurityContext),
-					ReadinessProbe: &corev1.Probe{
-						ProbeHandler: corev1.ProbeHandler{
-							Exec: &corev1.ExecAction{
-								// Use sc-exec --ready to check if rootfs is ready
-								// This is a built-in command that doesn't chroot
-								Command: []string{ExecWrapperBinPath + "/sc-exec", "--ready"},
-							},
-						},
-						InitialDelaySeconds: 1,
-						PeriodSeconds:       5,
-					},
-				},
-			},
-
-			Volumes: volumes,
-
-			// Image pull secrets
-			ImagePullSecrets: template.ImagePullSecrets,
-		},
+		Spec: *podSpec,
 	}
 }
 
@@ -153,7 +125,7 @@ func (b *ConsumerPodBuilder) consumerPodName() string {
 	return b.sci.Name
 }
 
-func (b *ConsumerPodBuilder) buildUserCommand(container scv1alpha1.ContainerSpec) []string {
+func (b *ConsumerPodBuilder) buildUserCommand(container *corev1.Container) []string {
 	if len(container.Command) == 0 && len(container.Args) == 0 {
 		return []string{"/bin/sh"}
 	}
@@ -292,6 +264,19 @@ func (b *ConsumerPodBuilder) buildSecurityContext(userCtx *corev1.SecurityContex
 	}
 
 	return ctx
+}
+
+func (b *ConsumerPodBuilder) buildLabels(userLabels map[string]string) map[string]string {
+	labels := make(map[string]string)
+	// Copy user labels first
+	for k, v := range userLabels {
+		labels[k] = v
+	}
+	// System labels override user labels to ensure correct operation
+	labels[LabelManagedBy] = "stoppablecontainer"
+	labels[LabelInstance] = b.sci.Name
+	labels[LabelRole] = "consumer"
+	return labels
 }
 
 func (b *ConsumerPodBuilder) buildAnnotations(userAnnotations map[string]string) map[string]string {

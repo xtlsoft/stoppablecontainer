@@ -33,10 +33,12 @@ metadata:
 spec:
   running: true
   template:
-    container:
-      image: ubuntu:22.04
-      command: ["/bin/bash", "-c"]
-      args: ["while true; do date; sleep 5; done"]
+    spec:
+      containers:
+        - name: main
+          image: ubuntu:22.04
+          command: ["/bin/bash", "-c"]
+          args: ["while true; do date; sleep 5; done"]
 ```
 
 Apply the manifest:

@@ -52,9 +52,14 @@ var _ = Describe("StoppableContainerInstance Controller", func() {
 					StoppableContainerName: resourceName,
 					Running:                true,
 					Template: scv1alpha1.PodTemplateSpec{
-						Container: scv1alpha1.ContainerSpec{
-							Image:   "ubuntu:22.04",
-							Command: []string{"sleep", "infinity"},
+						Spec: corev1.PodSpec{
+							Containers: []corev1.Container{
+								{
+									Name:    "main",
+									Image:   "ubuntu:22.04",
+									Command: []string{"sleep", "infinity"},
+								},
+							},
 						},
 					},
 					HostPathPrefix: "/var/lib/stoppablecontainer",

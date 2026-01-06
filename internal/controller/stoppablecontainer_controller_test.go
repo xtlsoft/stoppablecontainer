@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -49,9 +50,14 @@ var _ = Describe("StoppableContainer Controller", func() {
 				Spec: scv1alpha1.StoppableContainerSpec{
 					Running: false,
 					Template: scv1alpha1.PodTemplateSpec{
-						Container: scv1alpha1.ContainerSpec{
-							Image:   "ubuntu:22.04",
-							Command: []string{"sleep", "infinity"},
+						Spec: corev1.PodSpec{
+							Containers: []corev1.Container{
+								{
+									Name:    "main",
+									Image:   "ubuntu:22.04",
+									Command: []string{"sleep", "infinity"},
+								},
+							},
 						},
 					},
 				},

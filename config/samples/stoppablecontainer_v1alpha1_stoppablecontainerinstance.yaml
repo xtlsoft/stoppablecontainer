@@ -13,19 +13,27 @@ spec:
   running: true
   
   template:
-    container:
-      image: ubuntu:22.04
-      command:
-        - /bin/bash
-        - -c
-        - sleep infinity
-      resources:
-        requests:
-          memory: "256Mi"
-          cpu: "250m"
-        limits:
-          memory: "512Mi"
-          cpu: "500m"
+    # Pod metadata
+    metadata:
+      labels:
+        app: example
+    
+    # Standard Kubernetes PodSpec
+    spec:
+      containers:
+        - name: main
+          image: ubuntu:22.04
+          command:
+            - /bin/bash
+            - -c
+            - sleep infinity
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
   
   provider:
     resources:

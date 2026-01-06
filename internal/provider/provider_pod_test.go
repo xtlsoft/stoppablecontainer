@@ -40,9 +40,14 @@ func createTestSCI(name, namespace, image string) *scv1alpha1.StoppableContainer
 		Spec: scv1alpha1.StoppableContainerInstanceSpec{
 			Running: true,
 			Template: scv1alpha1.PodTemplateSpec{
-				Container: scv1alpha1.ContainerSpec{
-					Image:   image,
-					Command: []string{"/bin/sh", "-c", "echo hello"},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:    "main",
+							Image:   image,
+							Command: []string{"/bin/sh", "-c", "echo hello"},
+						},
+					},
 				},
 			},
 		},
@@ -325,7 +330,7 @@ func TestProviderPodBuilder_BuildRootfsContainer(t *testing.T) {
 
 	t.Run("with image pull policy", func(t *testing.T) {
 		sci := createTestSCI("test", "default", "alpine:latest")
-		sci.Spec.Template.Container.ImagePullPolicy = corev1.PullAlways
+		sci.Spec.Template.Spec.Containers[0].ImagePullPolicy = corev1.PullAlways
 		builder := NewProviderPodBuilder(sci)
 		container := builder.buildRootfsContainer()
 

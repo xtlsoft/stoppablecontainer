@@ -271,7 +271,7 @@ func (b *ProviderPodBuilder) Build() *corev1.Pod {
 					},
 				},
 			},
-			ImagePullSecrets: b.sci.Spec.Template.ImagePullSecrets,
+			ImagePullSecrets: b.sci.Spec.Template.Spec.ImagePullSecrets,
 		},
 	}
 }
@@ -315,9 +315,19 @@ func (b *ProviderPodBuilder) minimalResources() corev1.ResourceRequirements {
 // The container is marked with ROOTFS_MARKER environment variable so the
 // mount-helper DaemonSet can identify it and create the appropriate mounts.
 func (b *ProviderPodBuilder) buildRootfsContainer() corev1.Container {
+	// Get the first container from the spec as the main workload container
+	var userImage string
+	var userImagePullPolicy corev1.PullPolicy
+	if len(b.sci.Spec.Template.Spec.Containers) > 0 {
+		userImage = b.sci.Spec.Template.Spec.Containers[0].Image
+		userImagePullPolicy = b.sci.Spec.Template.Spec.Containers[0].ImagePullPolicy
+	} else {
+		userImage = "busybox:stable" // Fallback
+	}
+
 	container := corev1.Container{
 		Name:  RootfsContainerName,
-		Image: b.sci.Spec.Template.Container.Image,
+		Image: userImage,
 		// Use the injected static pause binary as the command
 		// This works for any image because:
 		// 1. The binary is statically compiled (no library dependencies)
@@ -347,8 +357,8 @@ func (b *ProviderPodBuilder) buildRootfsContainer() corev1.Container {
 	}
 
 	// If user specified ImagePullPolicy, use it
-	if b.sci.Spec.Template.Container.ImagePullPolicy != "" {
-		container.ImagePullPolicy = b.sci.Spec.Template.Container.ImagePullPolicy
+	if userImagePullPolicy != "" {
+		container.ImagePullPolicy = userImagePullPolicy
 	}
 
 	return container

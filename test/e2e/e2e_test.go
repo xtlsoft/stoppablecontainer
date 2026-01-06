@@ -386,9 +386,11 @@ metadata:
 spec:
   running: true
   template:
-    container:
-      image: busybox:stable
-      command: ["/bin/sh", "-c", "echo 'E2E test running'; while true; do date; sleep 5; done"]
+    spec:
+      containers:
+        - name: main
+          image: busybox:stable
+          command: ["/bin/sh", "-c", "echo 'E2E test running'; while true; do date; sleep 5; done"]
 `, scName, testNamespace)
 
 			cmd := exec.Command("kubectl", "apply", "-f", "-")

@@ -10,43 +10,62 @@ spec:
   running: true
   
   template:
+    # Pod metadata - labels and annotations for the consumer pod
+    # These are passed through to the created pod, allowing integration with
+    # admission controllers, service meshes, kueue, etc.
     metadata:
       labels:
         app: example
-    container:
-      # The actual image you want to run
-      image: ubuntu:22.04
-      
-      # Command to run inside the container
-      command:
-        - /bin/bash
-        - -c
-        - |
-          echo "Hello from StoppableContainer!"
-          echo "Creating a test file..."
-          echo "This file persists across stops!" > /tmp/persistent-test.txt
-          echo "Sleeping forever..."
-          sleep infinity
-      
-      # Resource requirements for the consumer (workload) pod
-      resources:
-        requests:
-          memory: "256Mi"
-          cpu: "250m"
-        limits:
-          memory: "512Mi"
-          cpu: "500m"
-      
-      # Environment variables
-      env:
-        - name: MY_VAR
-          value: "hello-world"
+        # For kueue integration, add queue label:
+        # kueue.x-k8s.io/queue-name: user-queue
+      annotations:
+        example.com/description: "Example StoppableContainer"
     
-    # Additional volumes can be added here
-    # volumes:
-    #   - name: data
-    #     persistentVolumeClaim:
-    #       claimName: my-pvc
+    # Standard Kubernetes PodSpec - all fields are supported
+    # The first container in the list is used as the main workload container
+    spec:
+      containers:
+        - name: main
+          # The actual image you want to run
+          image: ubuntu:22.04
+          
+          # Command to run inside the container
+          command:
+            - /bin/bash
+            - -c
+            - |
+              echo "Hello from StoppableContainer!"
+              echo "Creating a test file..."
+              echo "This file persists across stops!" > /tmp/persistent-test.txt
+              echo "Sleeping forever..."
+              sleep infinity
+          
+          # Resource requirements for the consumer (workload) pod
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          
+          # Environment variables
+          env:
+            - name: MY_VAR
+              value: "hello-world"
+      
+      # Service account (optional)
+      # serviceAccountName: my-service-account
+      
+      # For kueue integration, you can specify:
+      # schedulerName: "kueue-scheduler"
+      # priorityClassName: "high-priority"
+      
+      # Additional volumes can be added here
+      # volumes:
+      #   - name: data
+      #     persistentVolumeClaim:
+      #       claimName: my-pvc
   
   # Provider pod configuration (minimal resources for filesystem holding)
   provider:

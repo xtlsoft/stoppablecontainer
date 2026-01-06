@@ -21,103 +21,20 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// ContainerSpec defines the container specification for StoppableContainer
-type ContainerSpec struct {
-	// Image is the container image to use
-	// +kubebuilder:validation:Required
-	Image string `json:"image"`
-
-	// ImagePullPolicy defines the image pull policy
-	// +kubebuilder:default=IfNotPresent
-	// +optional
-	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy,omitempty"`
-
-	// Command is the entrypoint array (replaces ENTRYPOINT)
-	// +optional
-	Command []string `json:"command,omitempty"`
-
-	// Args are the arguments to the entrypoint (replaces CMD)
-	// +optional
-	Args []string `json:"args,omitempty"`
-
-	// WorkingDir is the working directory inside the container
-	// +optional
-	WorkingDir string `json:"workingDir,omitempty"`
-
-	// Env defines environment variables for the container
-	// +optional
-	Env []corev1.EnvVar `json:"env,omitempty"`
-
-	// EnvFrom defines environment variable sources
-	// +optional
-	EnvFrom []corev1.EnvFromSource `json:"envFrom,omitempty"`
-
-	// Resources defines the resource requirements
-	// +optional
-	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
-
-	// VolumeMounts defines the volume mounts for the container
-	// +optional
-	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
-
-	// Ports defines the ports to expose
-	// +optional
-	Ports []corev1.ContainerPort `json:"ports,omitempty"`
-
-	// SecurityContext defines the security context for the container
-	// +optional
-	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
-}
-
-// PodTemplateSpec defines the pod template for the consumer pod
+// PodTemplateSpec defines the pod template for the consumer pod.
+// This embeds the standard Kubernetes PodSpec, providing full compatibility
+// with all PodSpec fields and admission controllers.
 type PodTemplateSpec struct {
-	// Metadata for the pod
+	// Metadata for the pod (labels, annotations, etc.)
+	// System labels (stoppablecontainer.xtlsoft.top/*) will be merged with user labels
 	// +optional
 	Metadata metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// Container is the main container specification
+	// Spec is the standard Kubernetes PodSpec
+	// Note: The first container in the containers list is used as the main workload container.
+	// Fields like nodeName, restartPolicy are managed by the controller and will be overridden.
 	// +kubebuilder:validation:Required
-	Container ContainerSpec `json:"container"`
-
-	// InitContainers defines init containers for the consumer pod
-	// +optional
-	InitContainers []corev1.Container `json:"initContainers,omitempty"`
-
-	// Volumes defines the volumes for the pod
-	// +optional
-	Volumes []corev1.Volume `json:"volumes,omitempty"`
-
-	// ServiceAccountName is the service account for the pod
-	// +optional
-	ServiceAccountName string `json:"serviceAccountName,omitempty"`
-
-	// NodeSelector defines the node selector for scheduling
-	// +optional
-	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
-
-	// Affinity defines the affinity rules for scheduling
-	// +optional
-	Affinity *corev1.Affinity `json:"affinity,omitempty"`
-
-	// Tolerations defines the tolerations for scheduling
-	// +optional
-	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
-
-	// RuntimeClassName is the runtime class for the pod
-	// +optional
-	RuntimeClassName *string `json:"runtimeClassName,omitempty"`
-
-	// HostNetwork determines if the pod uses host networking
-	// +optional
-	HostNetwork bool `json:"hostNetwork,omitempty"`
-
-	// DNSPolicy defines the DNS policy for the pod
-	// +optional
-	DNSPolicy corev1.DNSPolicy `json:"dnsPolicy,omitempty"`
-
-	// ImagePullSecrets defines the image pull secrets
-	// +optional
-	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
+	Spec corev1.PodSpec `json:"spec"`
 }
 
 // ProviderSpec defines the provider pod specification
