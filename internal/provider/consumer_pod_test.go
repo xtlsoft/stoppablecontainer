@@ -568,6 +568,50 @@ func TestConsumerPodBuilder_BuildInitContainers(t *testing.T) {
 	}
 }
 
+func TestConsumerPodBuilder_BuildInitContainers_VolumeNameMapping(t *testing.T) {
+	sci := createTestSCI("test", "default", "alpine:latest")
+	builder := NewConsumerPodBuilder(sci, "node-1")
+
+	userInitContainers := []corev1.Container{
+		{
+			Name:    "my-init",
+			Image:   "busybox:stable",
+			Command: []string{"/bin/sh", "-c", "cp /bin/echo /shared/"},
+			VolumeMounts: []corev1.VolumeMount{
+				{
+					Name:      "shared-bin",
+					MountPath: "/shared",
+				},
+			},
+		},
+	}
+
+	initContainers := builder.buildInitContainers(userInitContainers)
+
+	// Find the user init container
+	var userInit *corev1.Container
+	for i := range initContainers {
+		if initContainers[i].Name == "user-my-init" {
+			userInit = &initContainers[i]
+			break
+		}
+	}
+
+	if userInit == nil {
+		t.Fatal("User init container not found")
+	}
+
+	// Check volumeMount name was updated
+	if len(userInit.VolumeMounts) != 1 {
+		t.Fatalf("Expected 1 volumeMount, got %d", len(userInit.VolumeMounts))
+	}
+
+	if userInit.VolumeMounts[0].Name != "user-shared-bin" {
+		t.Errorf("VolumeMount name = %q, want %q",
+			userInit.VolumeMounts[0].Name, "user-shared-bin")
+	}
+}
+
 func int64Ptr(i int64) *int64 {
 	return &i
 }

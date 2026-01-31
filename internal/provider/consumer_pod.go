@@ -322,6 +322,10 @@ func (b *ConsumerPodBuilder) buildInitContainers(userInitContainers []corev1.Con
 	for _, c := range userInitContainers {
 		userInit := c.DeepCopy()
 		userInit.Name = "user-" + c.Name
+		// Update volumeMount names to use user- prefix to match renamed volumes
+		for i := range userInit.VolumeMounts {
+			userInit.VolumeMounts[i].Name = "user-" + userInit.VolumeMounts[i].Name
+		}
 		initContainers = append(initContainers, *userInit)
 	}
 
