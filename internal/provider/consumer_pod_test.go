@@ -23,7 +23,8 @@ import (
 )
 
 const (
-	testAppName = "my-app"
+	testAppName     = "my-app"
+	testUserDataVol = "user-data"
 )
 
 func TestNewConsumerPodBuilder(t *testing.T) {
@@ -390,10 +391,10 @@ func TestConsumerPodBuilder_BuildVolumeMounts(t *testing.T) {
 	foundDataOriginal := false
 	foundDataRootfs := false
 	for _, m := range mounts {
-		if m.Name == "user-data" && m.MountPath == "/data" {
+		if m.Name == testUserDataVol && m.MountPath == "/data" {
 			foundDataOriginal = true
 		}
-		if m.Name == "user-data" && m.MountPath == "/rootfs/data" {
+		if m.Name == testUserDataVol && m.MountPath == "/rootfs/data" {
 			foundDataRootfs = true
 		}
 	}
@@ -478,7 +479,7 @@ func TestConsumerPodBuilder_BuildVolumes(t *testing.T) {
 	// Check user volumes exist (no separate rootfs volumes anymore)
 	foundDataVolume := false
 	for _, v := range volumes {
-		if v.Name == "user-data" {
+		if v.Name == testUserDataVol {
 			foundDataVolume = true
 		}
 	}
