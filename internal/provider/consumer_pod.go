@@ -176,8 +176,10 @@ func (b *ConsumerPodBuilder) buildVolumeMounts(userMounts []corev1.VolumeMount) 
 		userMount.Name = "user-" + m.Name
 		mounts = append(mounts, *userMount)
 
+		// Mount the SAME volume at the rootfs path so init containers
+		// can write files that are visible inside the chroot environment
 		rootfsMount := m.DeepCopy()
-		rootfsMount.Name = "user-" + m.Name + "-rootfs"
+		rootfsMount.Name = "user-" + m.Name // Same volume, different mount path
 		rootfsMount.MountPath = RootfsMountPath + m.MountPath
 		mounts = append(mounts, *rootfsMount)
 	}
@@ -214,10 +216,9 @@ func (b *ConsumerPodBuilder) buildVolumes(userVolumes []corev1.Volume, hostPath 
 		userVol := v.DeepCopy()
 		userVol.Name = "user-" + v.Name
 		volumes = append(volumes, *userVol)
-
-		rootfsVol := v.DeepCopy()
-		rootfsVol.Name = "user-" + v.Name + "-rootfs"
-		volumes = append(volumes, *rootfsVol)
+		// No separate rootfs volume - the same volume is mounted at both
+		// the original path and /rootfs/<path> so init containers can
+		// write files visible inside the chroot environment
 	}
 
 	return volumes

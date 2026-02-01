@@ -386,14 +386,14 @@ func TestConsumerPodBuilder_BuildVolumeMounts(t *testing.T) {
 		t.Error("Bin overlay volume mount not found")
 	}
 
-	// Check user mounts have both original and rootfs versions
+	// Check user mounts have both original and rootfs versions (same volume name, different paths)
 	foundDataOriginal := false
 	foundDataRootfs := false
 	for _, m := range mounts {
 		if m.Name == "user-data" && m.MountPath == "/data" {
 			foundDataOriginal = true
 		}
-		if m.Name == "user-data-rootfs" && m.MountPath == "/rootfs/data" {
+		if m.Name == "user-data" && m.MountPath == "/rootfs/data" {
 			foundDataRootfs = true
 		}
 	}
@@ -431,12 +431,14 @@ func TestConsumerPodBuilder_BuildVolumes(t *testing.T) {
 	hostPathType := corev1.HostPathDirectory
 	volumes := builder.buildVolumes(userVolumes, "/var/lib/test", hostPathType)
 
-	// Should have base volumes + 2 user volumes * 2 (original + rootfs)
+	// Should have base volumes + 2 user volumes
 	// Base: PropagatedVolume, ExecWrapperVolume, BinOverlayVolume = 3
-	// User: 2 * 2 = 4
-	// Total = 7
-	if len(volumes) != 7 {
-		t.Errorf("Expected 7 volumes, got %d", len(volumes))
+	// User: 2
+	// Total = 5
+	// Note: We no longer create separate -rootfs volumes; the same volume
+	// is mounted at both original path and /rootfs/<path>
+	if len(volumes) != 5 {
+		t.Errorf("Expected 5 volumes, got %d", len(volumes))
 	}
 
 	// Check base volumes exist
@@ -473,22 +475,15 @@ func TestConsumerPodBuilder_BuildVolumes(t *testing.T) {
 		t.Error("Bin overlay volume not found")
 	}
 
-	// Check user volumes have both original and rootfs versions
-	foundDataOriginal := false
-	foundDataRootfs := false
+	// Check user volumes exist (no separate rootfs volumes anymore)
+	foundDataVolume := false
 	for _, v := range volumes {
 		if v.Name == "user-data" {
-			foundDataOriginal = true
-		}
-		if v.Name == "user-data-rootfs" {
-			foundDataRootfs = true
+			foundDataVolume = true
 		}
 	}
-	if !foundDataOriginal {
+	if !foundDataVolume {
 		t.Error("User data volume not found")
-	}
-	if !foundDataRootfs {
-		t.Error("User data rootfs volume not found")
 	}
 }
 

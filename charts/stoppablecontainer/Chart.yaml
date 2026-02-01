@@ -2,8 +2,8 @@ apiVersion: v2
 name: stoppablecontainer
 description: A Kubernetes operator for stoppable containers with persistent ephemeral filesystems
 type: application
-version: 0.1.8
-appVersion: "0.1.8"
+version: 0.1.9
+appVersion: "0.1.9"
 keywords:
   - kubernetes
   - operator
