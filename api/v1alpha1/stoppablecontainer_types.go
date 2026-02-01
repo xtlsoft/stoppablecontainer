@@ -27,6 +27,7 @@ import (
 type PodTemplateSpec struct {
 	// Metadata for the pod (labels, annotations, etc.)
 	// System labels (stoppablecontainer.xtlsoft.top/*) will be merged with user labels
+	// +kubebuilder:pruning:PreserveUnknownFields
 	// +optional
 	Metadata metav1.ObjectMeta `json:"metadata,omitempty"`
 
