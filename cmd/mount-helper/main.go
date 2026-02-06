@@ -232,8 +232,14 @@ func processRequest(workDir, requestFile string) error {
 // findRootfsContainer searches /proc for a container with ROOTFS_MARKER env var
 // belonging to the specified pod UID
 func findRootfsContainer(podUID string) (int, error) {
-	// Convert pod UID format for cgroup matching (replace - with _)
-	podUIDCgroup := strings.ReplaceAll(podUID, "-", "_")
+	// Build list of possible pod UID formats for cgroup matching:
+	// - cgroup v1: uses underscore format with "pod" prefix (e.g., "pod12345678_1234_1234_1234_123456789012")
+	// - cgroup v2: may use original hyphenated format (e.g., "12345678-1234-1234-1234-123456789012")
+	// - Some systems may use "pod" prefix with hyphenated format (e.g., "pod12345678-1234-1234-1234-123456789012")
+	podUIDVariants := []string{
+		strings.ReplaceAll(podUID, "-", "_"), // underscore format (cgroup v1 style)
+		podUID,                                // original hyphenated format (cgroup v2 style)
+	}
 
 	procDir := "/proc"
 	entries, err := os.ReadDir(procDir)
@@ -255,7 +261,16 @@ func findRootfsContainer(podUID string) (int, error) {
 			continue
 		}
 
-		if !strings.Contains(string(cgroupData), podUIDCgroup) {
+		// Check if any of the pod UID variants match
+		cgroupStr := string(cgroupData)
+		matched := false
+		for _, variant := range podUIDVariants {
+			if strings.Contains(cgroupStr, variant) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
 			continue
 		}
 
